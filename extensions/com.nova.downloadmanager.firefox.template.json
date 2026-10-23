@@ -1,0 +1,9 @@
+{
+  "name": "com.nova.downloadmanager",
+  "description": "Nova Download Manager — native messaging bridge",
+  "path": "/usr/bin/novabrowserhost",
+  "type": "stdio",
+  "allowed_extensions": [
+    "nova@novadm.dev"
+  ]
+}

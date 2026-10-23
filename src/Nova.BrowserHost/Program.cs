@@ -91,8 +91,10 @@ public static class Program
             case "add_downloads":
             case "media_probe":
             case "engine_status":
-            case "task_status":
                 return await ForwardToEngineAsync(type!, payload);
+
+            case "task_status":
+                return await ForwardToEngineAsync("get_task", payload);
 
             default:
                 return Error("unknown_type", $"Unsupported message '{type}'.");
@@ -117,7 +119,8 @@ public static class Program
                 return Error(err?.Code ?? "engine_error", err?.Message ?? "Engine rejected the request.");
             }
             if (resp.Payload is null) return Ok(null);
-            return JsonDocument.Parse(resp.Payload.Value.GetRawText()).RootElement;
+            // Wrap engine payloads in the extension-side {ok, data} envelope (consistent contract).
+            return Ok(JsonDocument.Parse(resp.Payload.Value.GetRawText()).RootElement);
         }
         catch (TimeoutException)
         {
@@ -143,8 +146,9 @@ public static class Program
             client.Disconnected += () => _ipc = null;
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            EngineLog.Error($"engine connect failed: {ex.GetType().Name}: {ex.Message}");
             // Try to START the engine at user level (never admin).
             if (!await TryStartEngineAsync()) return false;
             try
@@ -156,8 +160,9 @@ public static class Program
                 client.Disconnected += () => _ipc = null;
                 return true;
             }
-            catch
+            catch (Exception ex2)
             {
+                EngineLog.Error($"engine restart connect failed: {ex2.GetType().Name}: {ex2.Message}");
                 return false;
             }
         }
@@ -186,12 +191,16 @@ public static class Program
         }
     }
 
-    /// <summary>Reads the engine IPC token from the user-profile data dir (same secret space).</summary>
+    /// <summary>Reads the engine IPC token from the engine data dir (NOVA_DATA_DIR overrides; default profile dir otherwise).</summary>
     private static async Task<string> ReadEngineTokenAsync()
     {
-        var dir = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nova")
-            : Path.Combine(Environment.GetEnvironmentVariable("HOME") ?? ".", ".local", "share", "nova");
+        var dir = Environment.GetEnvironmentVariable("NOVA_DATA_DIR");
+        if (string.IsNullOrEmpty(dir))
+        {
+            dir = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nova")
+                : Path.Combine(Environment.GetEnvironmentVariable("HOME") ?? ".", ".local", "share", "nova");
+        }
         var path = Path.Combine(dir, "ipc.token");
         if (File.Exists(path))
         {
