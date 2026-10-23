@@ -1,0 +1,21 @@
+LICENSE — Nova Download Manager
+
+Copyright (c) 2026 Nova Engineering
+
+This product is delivered as source code. Licensing terms for distribution
+are the responsibility of the party building and shipping binaries.
+
+Component licensing summary:
+- Nova source code (C#, Dart, TypeScript, C++ bridge): provided as-is for the
+  commissioning party without an additional OSS license grant beyond the code
+  delivery itself.
+- .NET 8 runtime: MIT (Microsoft).
+- Microsoft.Data.Sqlite: MIT (Microsoft).
+- Flutter / Dart SDK: BSD-3-Clause (Google); riverpod: MIT; intl: BSD-3.
+- esbuild: MIT.
+- Optional runtime dependency: ffmpeg (LGPL/GPL) — NOT bundled; detected on
+  PATH only when the user installs it separately.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.

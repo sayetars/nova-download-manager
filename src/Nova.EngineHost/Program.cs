@@ -53,16 +53,44 @@ public static class Program
         }
         else
         {
-            // POSIX: lock file with O_EXCL semantics
+            // POSIX: lock file with PID — stale locks (crashed/killed engine) are reclaimed.
             var lockPath = Path.Combine(EngineHostApp.DefaultDataDir(), "engine.lock");
             Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
-            try
+            for (var attempt = 0; ; attempt++)
             {
-                var fs = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite,
-                    FileShare.None);
-                return fs;
+                try
+                {
+                    var fs = new FileStream(lockPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+                    var pid = System.Text.Encoding.UTF8.GetBytes($"{Environment.ProcessId}");
+                    fs.Write(pid, 0, pid.Length);
+                    fs.Flush();
+                    return fs;
+                }
+                catch (IOException) when (attempt == 0)
+                {
+                    if (!IsStaleLock(lockPath)) return null;
+                    try { File.Delete(lockPath); } catch { return null; }
+                }
+                catch (IOException)
+                {
+                    return null;
+                }
             }
-            catch (IOException) { return null; }
+        }
+    }
+
+    /// <summary>A lock is stale when the recorded PID no longer exists.</summary>
+    private static bool IsStaleLock(string lockPath)
+    {
+        try
+        {
+            var text = File.ReadAllText(lockPath).Trim();
+            if (!int.TryParse(text, out var pid) || pid <= 0) return true;
+            return !File.Exists($"/proc/{pid}");
+        }
+        catch
+        {
+            return true;
         }
     }
 
