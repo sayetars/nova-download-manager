@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 /// nipc/1 wire protocol — mirrors src/Nova.Ipc/Protocol.cs exactly.
@@ -7,6 +8,15 @@ class Protocol {
   static const String pipeName = 'nova-engine-v1';
   static const int maxFrameBytes = 4 * 1024 * 1024;
   static const int requestTimeoutMs = 30000;
+
+  /// Socket path on Linux/macOS, mirroring the C# side (Protocol.ResolvedPipeName):
+  /// System.IO.Pipes maps a plain pipe name to <tempdir>/CoreFxPipe_<name>;
+  /// an absolute NOVA_PIPE_PATH wins on both ends for hardened setups.
+  static String get pipePath {
+    final env = Platform.environment['NOVA_PIPE_PATH'];
+    if (env != null && env.startsWith('/')) return env;
+    return '${Directory.systemTemp.path}/CoreFxPipe_$pipeName';
+  }
 }
 
 class Envelope {

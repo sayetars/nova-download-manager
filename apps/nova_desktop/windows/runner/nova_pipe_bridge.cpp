@@ -66,7 +66,9 @@ void PipeBridge::StartReader() {
       if (read == 0) continue;
 
       pending.insert(pending.end(), buffer.begin(), buffer.begin() + read);
-      // Extract as many complete frames as available: [4-byte LE len][payload]
+      // Extract as many complete frames as available: [4-byte LE len][payload].
+      // Deliver the FULL frame (prefix included) — Framing.tryDecode on the
+      // Dart side expects the length prefix in the buffer.
       while (true) {
         if (!frame_started) {
           if (pending.size() < 4) break;
@@ -76,13 +78,12 @@ void PipeBridge::StartReader() {
             pending.clear();
             break;
           }
-          pending.erase(pending.begin(), pending.begin() + 4);
-          frame.reserve(frame_len);
+          frame.reserve(frame_len + 4);
           frame_started = true;
         }
-        if (pending.size() < frame_len) break;
-        frame.assign(pending.begin(), pending.begin() + frame_len);
-        pending.erase(pending.begin(), pending.begin() + frame_len);
+        if (pending.size() < frame_len + 4) break;
+        frame.assign(pending.begin(), pending.begin() + frame_len + 4);
+        pending.erase(pending.begin(), pending.begin() + frame_len + 4);
         frame_started = false;
         DeliverFrame(frame);
       }

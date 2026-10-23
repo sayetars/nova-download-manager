@@ -66,6 +66,89 @@ class WindowsPipeTransport implements NovaTransport {
   }
 }
 
+/// Unix-domain-socket transport for Linux/macOS dev — the .NET engine's
+/// System.IO.Pipes maps its named pipe to a user-owned UDS
+/// (<tempdir>/CoreFxPipe_<name>, or NOVA_PIPE_PATH when absolute).
+/// Stream chunks may contain several length-prefixed frames, so bytes are
+/// buffered and split into exactly one frame per event.
+class UnixSocketTransport implements NovaTransport {
+  Socket? _socket;
+  final _incoming = StreamController<Uint8List>.broadcast();
+  Uint8List _buf = Uint8List(0);
+  bool _closed = false;
+
+  @override
+  bool get isConnected => _socket != null;
+
+  @override
+  Future<void> connect(String pipeName, String token) async {
+    final socket = await Socket.connect(
+      InternetAddress(Protocol.pipePath, type: InternetAddressType.unix),
+      0,
+      timeout: const Duration(seconds: 5),
+    );
+    _closed = false;
+    _socket = socket;
+    socket.listen(
+      _onData,
+      onError: (Object e) {
+        if (!_closed) _incoming.addError(e);
+      },
+      onDone: () {
+        // Surface the disconnect as an error instead of closing the stream —
+        // the controller must stay open so the client can reconnect.
+        _socket = null;
+        if (!_closed) _incoming.addError(StateError('socket closed'));
+      },
+    );
+  }
+
+  void _onData(Uint8List chunk) {
+    if (_closed) return;
+    final merged = Uint8List(_buf.length + chunk.length)
+      ..setRange(0, _buf.length, _buf)
+      ..setRange(_buf.length, _buf.length + chunk.length, chunk);
+    _buf = merged;
+    var offset = 0;
+    while (_buf.length - offset >= 4) {
+      final len = ByteData.sublistView(_buf, offset, offset + 4)
+          .getInt32(0, Endian.little);
+      if (len < 0 || len > Protocol.maxFrameBytes) {
+        throw StateError('bad frame length $len');
+      }
+      if (_buf.length - offset < 4 + len) break;
+      // Emit the FULL frame (length prefix included) — that is the contract
+      // Framing.tryDecode expects (mirrors the Windows C++ bridge).
+      _incoming.add(Uint8List.fromList(_buf.sublist(offset, offset + 4 + len)));
+      offset += 4 + len;
+    }
+    if (offset > 0) {
+      _buf = Uint8List.fromList(_buf.sublist(offset));
+    }
+  }
+
+  @override
+  Future<void> send(Uint8List bytes) async {
+    final socket = _socket;
+    if (_closed || socket == null) {
+      throw StateError('unix socket not connected');
+    }
+    socket.add(bytes);
+    await socket.flush();
+  }
+
+  @override
+  Stream<Uint8List> get incoming => _incoming.stream;
+
+  @override
+  Future<void> close() async {
+    _closed = true;
+    _socket?.destroy();
+    _socket = null;
+    await _incoming.close();
+  }
+}
+
 /// Reads the per-user IPC token from the engine data dir (mirrors C#).
 Future<String> readEngineToken() async {
   final home = Platform.environment['HOME'] ?? '';
@@ -88,6 +171,7 @@ class EngineClient {
 
   static NovaTransport _defaultTransport() {
     if (Platform.isWindows) return WindowsPipeTransport();
+    if (Platform.isLinux || Platform.isMacOS) return UnixSocketTransport();
     throw UnsupportedError('No default engine transport on this platform — inject one for tests/dev');
   }
 
@@ -105,17 +189,19 @@ class EngineClient {
   Future<void> connect({Duration retryEvery = const Duration(seconds: 3)}) async {
     if (_closed) return;
     try {
-      await _transport.connect(Protocol.pipeName, await readEngineToken());
-      // handshake
+      final token = await readEngineToken();
+      await _transport.connect(Protocol.pipeName, token);
+      // Listen BEFORE the handshake goes out — the ok/error reply arrives on
+      // this broadcast stream and must not be dropped.
+      _listenIncoming();
       final hello = Envelope(type: 'hello', payload: {
         'client': 'flutter-ui',
         'protocol_version': Protocol.version,
         'client_version': '1.0.0',
-      });
+      }, token: token);
       final resp = await _raw(hello, timeoutMs: 8000);
       if (resp.type != 'ok') throw StateError('handshake rejected: ${resp.type}');
       _authed = true;
-      _listenIncoming();
     } catch (e) {
       _scheduleReconnect(retryEvery);
       rethrow;
@@ -128,8 +214,12 @@ class EngineClient {
     _reconnectTimer = Timer(every, () => connect(retryEvery: every));
   }
 
+  StreamSubscription<Uint8List>? _rawSub;
+
   void _listenIncoming() {
-    _transport.incoming.listen((frame) {
+    // Idempotent: reconnects reuse the same subscription on the same transport.
+    if (_rawSub != null) return;
+    _rawSub = _transport.incoming.listen((frame) {
       final env = Framing.tryDecode(ByteData.sublistView(frame));
       if (env == null) return;
       if (env.id != null && _pending.containsKey(env.id)) {
@@ -144,6 +234,7 @@ class EngineClient {
       _scheduleReconnect(const Duration(seconds: 3));
     }, onDone: () {
       _authed = false;
+      _rawSub = null;
       _failPending('connection closed');
       _scheduleReconnect(const Duration(seconds: 3));
     });

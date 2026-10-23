@@ -22,7 +22,9 @@ class EngineNotifier extends Notifier<EngineClient?> {
   }
 
   Future<void> _boot() async {
-    if (!Platform.isWindows) return; // dev on other hosts: stay offline; engine runs separately
+    if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) {
+      return; // dev on other hosts: stay offline; engine runs separately
+    }
     final client = EngineClient();
     try {
       await client.connect();
@@ -40,11 +42,11 @@ class EngineNotifier extends Notifier<EngineClient?> {
   }
 
   Future<void> _tryLaunchEngine() async {
-    if (!Platform.isWindows) return;
+    if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) return;
     try {
       final exe = Platform.resolvedExecutable;
       final dir = File(exe).parent.path;
-      final engine = '$dir\\NovaEngine.exe';
+      final engine = Platform.isWindows ? '$dir\\NovaEngine.exe' : '$dir/NovaEngine';
       if (File(engine).existsSync()) {
         await Process.start(engine, [], mode: ProcessStartMode.detached);
         await Future<void>.delayed(const Duration(milliseconds: 900));

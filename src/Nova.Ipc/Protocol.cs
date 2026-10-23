@@ -16,6 +16,22 @@ public static class Protocol
     /// <summary>Local-user secret shared via user-profile config; read by engine &amp; trusted local clients.</summary>
     public const string AuthTokenSetting = "ipc.auth_token";
 
+    /// <summary>
+    /// Actual pipe/socket name used at runtime. Windows keeps the classic named pipe;
+    /// Unix maps "name" to /tmp/CoreFxPipe_name (System.IO.Pipes) unless NOVA_PIPE_PATH
+    /// points at an absolute socket path (hardened setups). MUST stay in sync with
+    /// apps/nova_desktop/lib/core/protocol.dart (pipePath).
+    /// </summary>
+    public static string ResolvedPipeName
+    {
+        get
+        {
+            var env = Environment.GetEnvironmentVariable("NOVA_PIPE_PATH");
+            if (!string.IsNullOrWhiteSpace(env) && Path.IsPathRooted(env)) return env;
+            return PipeName;
+        }
+    }
+
     public static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,

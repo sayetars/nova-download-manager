@@ -62,14 +62,14 @@ public sealed class IpcServer : IAsyncDisposable
                         WindowsIdentityGetter.Current, PipeAccessRights.ReadWrite,
                         System.Security.AccessControl.AccessControlType.Allow));
                     pipe = NamedPipeServerStreamAcl.Create(
-                        Protocol.PipeName, PipeDirection.InOut,
+                        Protocol.ResolvedPipeName, PipeDirection.InOut,
                         Protocol.MaxConnections, PipeTransmissionMode.Byte,
                         PipeOptions.Asynchronous, 0, 0, acl);
                 }
                 else
                 {
                     pipe = new NamedPipeServerStream(
-                        Protocol.PipeName, PipeDirection.InOut,
+                        Protocol.ResolvedPipeName, PipeDirection.InOut,
                         Protocol.MaxConnections, PipeTransmissionMode.Byte,
                         PipeOptions.Asynchronous);
                 }

@@ -22,7 +22,7 @@ public sealed class IpcClient : IAsyncDisposable
 
     public async Task<bool> ConnectAsync(string token, string clientName, int timeoutMs = 4000)
     {
-        _pipe = new NamedPipeClientStream(".", Protocol.PipeName, PipeDirection.InOut,
+        _pipe = new NamedPipeClientStream(".", Protocol.ResolvedPipeName, PipeDirection.InOut,
             PipeOptions.Asynchronous);
         await _pipe.ConnectAsync(timeoutMs);
         await Framing.WriteFrameAsync(_pipe,

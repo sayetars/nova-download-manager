@@ -107,11 +107,22 @@ public sealed class BrowserPathFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>Config the tests were built in (Debug/Release) so engine bins resolve on any build.</summary>
+    private static string TestConfig
+    {
+        get
+        {
+            var netDir = Path.GetDirectoryName(typeof(BrowserPathFixture).Assembly.Location)!; // .../bin/<cfg>/net8.0
+            var cfg = Path.GetFileName(Path.GetDirectoryName(netDir));
+            return string.IsNullOrEmpty(cfg) ? "Debug" : cfg;
+        }
+    }
+
     private static string EngineHostBin =>
-        Path.Combine(RepoRoot, "src", "Nova.EngineHost", "bin", "Debug", "net8.0",
+        Path.Combine(RepoRoot, "src", "Nova.EngineHost", "bin", TestConfig, "net8.0",
             OperatingSystem.IsWindows() ? "NovaEngine.exe" : "NovaEngine");
     private static string BrowserHostBin =>
-        Path.Combine(RepoRoot, "src", "Nova.BrowserHost", "bin", "Debug", "net8.0",
+        Path.Combine(RepoRoot, "src", "Nova.BrowserHost", "bin", TestConfig, "net8.0",
             OperatingSystem.IsWindows() ? "NovaBrowserHost.exe" : "NovaBrowserHost");
 
     public async Task InitializeAsync()
