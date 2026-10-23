@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Nova.Domain;
 using Nova.Engine;
+using Nova.Grabber;
 using Nova.Ipc;
 using Nova.Media;
 using Nova.Persistence;
@@ -19,11 +20,20 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
     private readonly DownloadTaskRepository _taskRepo;
     private readonly string _dataDir;
     private readonly string _downloadsDir;
+    private readonly LoginVault _vault;
+    private readonly GrabberService _grabber;
+    private readonly HttpClient _http;
+    private readonly Action _requestShutdown;
     private readonly IDisposable _subscription;
     private readonly DateTime _startedAt = DateTime.UtcNow;
+    private readonly NovaDatabase _db;
+
+    // in-flight grabber runs (taskKey → progress), one at a time per engine
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Nova.Grabber.GrabberService.GrabberProgress> _grabberStatus = new();
 
     public IpcMessageRouter(DownloadEngine engine, SchedulerService scheduler, ISettingsRepository settings,
-        IQueueRepository queues, MediaCandidatesService mediaProbe, NovaDatabase db, string dataDir, string downloadsDir)
+        IQueueRepository queues, MediaCandidatesService mediaProbe, NovaDatabase db, string dataDir, string downloadsDir,
+        LoginVault vault, GrabberService grabber, HttpClient http, Action requestShutdown)
     {
         _engine = engine;
         _scheduler = scheduler;
@@ -33,6 +43,11 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
         _taskRepo = new DownloadTaskRepository(db);
         _dataDir = dataDir;
         _downloadsDir = downloadsDir;
+        _vault = vault;
+        _grabber = grabber;
+        _http = http;
+        _requestShutdown = requestShutdown;
+        _db = db;
 
         // engine events → broadcast to all IPC clients (throttled for progress)
         _subscription = engine.Events.Subscribe(new BusSink(this));
@@ -290,6 +305,231 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                         : Envelope.Ok(id, new { path = t.DestinationDir });
                 }
 
+                // ===================== IDM parity additions =====================
+
+                case "update_task":
+                {
+                    var req = env.PayloadAs<UpdateTaskRequest>() ?? new();
+                    var t = _engine.Get(req.TaskKey);
+                    if (t is null) return Envelope.Error(id, "not_found", "not_found", "Task not found.");
+                    if (t.IsRunning)
+                        return Envelope.Error(id, "busy", "protocol", "Pause the task before editing it.");
+                    if (req.QueueName is { Length: > 0 }) { t.QueueName = req.QueueName; _queues.GetOrCreate(req.QueueName); }
+                    if (req.Category is { Length: > 0 }) t.Category = req.Category;
+                    if (req.Referer is not null) t.Referer = req.Referer;
+                    if (req.MaxConnections is { } mc) t.MaxConnections = Math.Clamp(mc, 1, 32);
+                    if (req.SpeedCapBytes is { } sc) t.SpeedCapBytes = Math.Max(0, sc);
+                    if (req.StartAtMs is { } sa) t.StartAtMs = Math.Max(0, sa);
+                    if (req.PostAction is not null && PostActionRunner.IsValid(req.PostAction)) t.PostAction = req.PostAction;
+                    if (req.Mirrors is not null) t.MirrorUrls = string.Join('\n', req.Mirrors);
+                    if (req.Priority is { } p) t.Priority = (TaskPriority)p;
+                    _taskRepo.Update(t);
+                    _engine.Events.TaskUpdated(t);
+                    return Envelope.Ok(id, TaskSnapshot.From(t));
+                }
+
+                case "ftp_list":
+                {
+                    var req = env.PayloadAs<FtpListRequest>() ?? new();
+                    var creds = string.IsNullOrEmpty(req.AuthUser)
+                        ? null
+                        : new TaskCredentials(req.AuthUser, req.AuthPassword ?? "");
+                    var entries = await Nova.Engine.FtpTask.ListAsync(req.Url, creds);
+                    return Envelope.Ok(id, new { entries });
+                }
+
+                case "zip_list":
+                {
+                    var req = env.PayloadAs<ZipListRequest>() ?? new();
+                    List<Nova.Engine.ZipPreview.ZipEntryInfo>? entries = null;
+                    string source = "";
+                    if (!string.IsNullOrEmpty(req.TaskKey))
+                    {
+                        var t = _engine.Get(req.TaskKey);
+                        if (t is null || t.State != DownloadState.Completed)
+                            return Envelope.Error(id, "not_ready", "protocol", "Task not completed.");
+                        if (!File.Exists(t.FinalPath))
+                            return Envelope.Error(id, "file_missing", "protocol", "The downloaded file no longer exists.");
+                        entries = ZipPreview.ListLocal(t.FinalPath);
+                        source = t.FinalPath;
+                    }
+                    else if (!string.IsNullOrEmpty(req.Url))
+                    {
+                        entries = await ZipPreview.ListRemoteAsync(_http, req.Url, req.Referer, ct);
+                        if (entries is null)
+                            return Envelope.Error(id, "not_a_zip", "protocol",
+                                "The server does not support ranged requests for ZIP preview.");
+                        source = req.Url;
+                    }
+                    else return Envelope.Error(id, "bad_request", "protocol", "task_key or url required.");
+                    return Envelope.Ok(id, new { source, entries });
+                }
+
+                case "zip_extract":
+                {
+                    var req = env.PayloadAs<ZipExtractRequest>() ?? new();
+                    var t = _engine.Get(req.TaskKey);
+                    if (t is null || t.State != DownloadState.Completed || !File.Exists(t.FinalPath))
+                        return Envelope.Error(id, "not_ready", "protocol", "Task not completed or file missing.");
+                    var dir = string.IsNullOrWhiteSpace(req.DestinationDir)
+                        ? Path.Combine(t.DestinationDir, Path.GetFileNameWithoutExtension(t.FileName) + "_files")
+                        : req.DestinationDir;
+                    try
+                    {
+                        ZipPreview.ExtractEntries(t.FinalPath, req.Entries, dir);
+                        return Envelope.Ok(id, new { extracted = req.Entries.Count, dir });
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        return Envelope.Error(id, "bad_entry", "protocol", ex.Message);
+                    }
+                }
+
+                case "grabber_start":
+                {
+                    var req = env.PayloadAs<GrabberStartRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.RootUrl))
+                        return Envelope.Error(id, "bad_request", "protocol", "root_url required.");
+                    var opts = new Nova.Grabber.GrabberService.GrabberOptions
+                    {
+                        MaxDepth = Math.Clamp(req.MaxDepth, 0, 10),
+                        FollowLinks = req.FollowLinks, Images = req.Images, Css = req.Css,
+                        Scripts = req.Scripts, Video = req.Video, RewriteForOffline = req.RewriteForOffline,
+                        IncludeFilter = req.IncludeFilter, ExcludeFilter = req.ExcludeFilter,
+                        SaveDirectory = string.IsNullOrWhiteSpace(req.SaveDirectory)
+                            ? Path.Combine(_downloadsDir, "grabber") : req.SaveDirectory,
+                    };
+                    var runId = Guid.NewGuid().ToString("N");
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var svc = new GrabberService(_db);
+                            svc.Progress += p =>
+                            {
+                                _grabberStatus[runId] = p;
+                                Server?.Broadcast("grabber_progress", new { run_id = runId, pages_done = p.PagesDone, pages_queued = p.PagesQueued, files_done = p.FilesDone, bytes_done = p.BytesDone, current = p.Current });
+                            };
+                            var result = await svc.RunAsync(_http, req.RootUrl, opts, CancellationToken.None);
+                            Server?.Broadcast("grabber_done", new { run_id = runId, pages = result.SavedPages.Count, failed = result.FailedPages.Count, files = result.FilesDone });
+                        }
+                        finally { _grabberStatus.TryRemove(runId, out _); }
+                    });
+                    return Envelope.Ok(id, new { run_id = runId });
+                }
+
+                case "grabber_status":
+                    return Envelope.Ok(id, new { runs = _grabberStatus.Select(kv => new { run_id = kv.Key, kv.Value.PagesDone, kv.Value.PagesQueued, kv.Value.FilesDone, kv.Value.BytesDone, kv.Value.Current }) });
+
+                case "grabber_projects":
+                    return Envelope.Ok(id, new { projects = _grabber.ListProjects() });
+
+                case "grabber_delete_project":
+                {
+                    var req = env.PayloadAs<TaskKeyRequest>() ?? new();
+                    if (long.TryParse(req.TaskKey, out var pid)) _grabber.DeleteProject(pid);
+                    return Envelope.Ok(id);
+                }
+
+                case "save_login":
+                {
+                    var req = env.PayloadAs<SaveLoginRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.Host) || string.IsNullOrWhiteSpace(req.UserName))
+                        return Envelope.Error(id, "bad_request", "protocol", "host and user_name required.");
+                    _vault.Save(req.Host, req.Realm, req.UserName, req.Password, req.Scheme);
+                    return Envelope.Ok(id);
+                }
+
+                case "list_logins":
+                    return Envelope.Ok(id, new { logins = _vault.ListSafe() });
+
+                case "delete_login":
+                {
+                    var req = env.PayloadAs<DeleteLoginRequest>() ?? new();
+                    _vault.Delete(req.Id);
+                    return Envelope.Ok(id);
+                }
+
+                case "list_categories":
+                {
+                    var customs = ListCategoryDefs();
+                    return Envelope.Ok(id, new { categories = customs });
+                }
+
+                case "save_category":
+                {
+                    var req = env.PayloadAs<SaveCategoryRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.Name))
+                        return Envelope.Error(id, "bad_request", "protocol", "name required.");
+                    SaveCategoryDef(req);
+                    return Envelope.Ok(id);
+                }
+
+                case "delete_category":
+                {
+                    var req = env.PayloadAs<DeleteCategoryRequest>() ?? new();
+                    DeleteCategoryDef(req.Name);
+                    return Envelope.Ok(id);
+                }
+
+                case "export_tasks":
+                {
+                    var tasks = _engine.All().Select(TaskSnapshot.From).ToList();
+                    return Envelope.Ok(id, new { json = JsonSerializer.Serialize(new { version = 1, exported_at = DateTimeOffset.UtcNow, tasks }) });
+                }
+
+                case "import_tasks":
+                {
+                    var req = env.PayloadAs<ImportTasksRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.Json))
+                        return Envelope.Error(id, "bad_request", "protocol", "json required.");
+                    List<AddDownloadRequest>? items;
+                    try
+                    {
+                        var doc = JsonSerializer.Deserialize<JsonElement>(req.Json);
+                        items = JsonSerializer.Deserialize<List<AddDownloadRequest>>(doc.GetProperty("tasks").GetRawText());
+                    }
+                    catch (Exception)
+                    {
+                        return Envelope.Error(id, "bad_json", "protocol", "The import file is not a Nova export.");
+                    }
+                    if (items is null) items = new();
+                    var outcomes = _engine.AddBatch(items.Select(i => ToSpec(i, req.AutoStart)));
+                    return Envelope.Ok(id, new { imported = outcomes.Count, tasks = outcomes.Select(o => new { o.TaskKey, o.Duplicate }) });
+                }
+
+                case "check_update":
+                {
+                    var req = env.PayloadAs<CheckUpdateRequest>() ?? new();
+                    var url = string.IsNullOrWhiteSpace(req.UpdateUrl) ? _settings.Get("update.url") : req.UpdateUrl;
+                    if (string.IsNullOrWhiteSpace(url))
+                        return Envelope.Error(id, "disabled", "protocol", "No update endpoint configured (update.url).");
+                    try
+                    {
+                        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                        using var resp = await http.GetAsync(url, ct);
+                        var body = await resp.Content.ReadAsStringAsync(ct);
+                        return Envelope.Ok(id, new { status_code = (int)resp.StatusCode, body = body.Length > 4000 ? body[..4000] : body });
+                    }
+                    catch (Exception ex)
+                    {
+                        return Envelope.Error(id, "network", "network", ex.Message);
+                    }
+                }
+
+                case "cancel_post_action":
+                {
+                    _settings.Set("engine.post_action", "");
+                    return Envelope.Ok(id);
+                }
+
+                case "expand_pattern":
+                {
+                    var req = env.PayloadAs<GrabberStartRequest>() ?? new();   // reuse: RootUrl holds the pattern
+                    var urls = Nova.Engine.UrlPatterns.Expand(req.RootUrl);
+                    return Envelope.Ok(id, new { urls });
+                }
+
                 default:
                     return Envelope.Error(id, "unknown_type", "protocol",
                         $"Unknown message type '{env.Type}'.");
@@ -331,7 +571,9 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
     private void SchedulerRulesWrite(List<SchedulerService.RuleDto> rules) =>
         _settings.Set("scheduler.rules", JsonSerializer.Serialize(rules));
 
-    private NewDownload ToSpec(AddDownloadRequest r) => new()
+    private NewDownload ToSpec(AddDownloadRequest r) => ToSpec(r, r.AutoStart);
+
+    private static NewDownload ToSpec(AddDownloadRequest r, bool autoStart) => new()
     {
         Url = r.Url,
         DestinationDir = r.DestinationDir,
@@ -341,6 +583,7 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
         Referer = r.Referer,
         ExpectedSha256 = r.ExpectedSha256,
         MaxConnections = r.MaxConnections,
+        SpeedCapBytes = 0,
         Priority = r.Priority is { } p ? (TaskPriority)p : TaskPriority.Normal,
         Kind = r.Kind?.ToLowerInvariant() switch
         {
@@ -349,6 +592,54 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
             _ => null,
         },
         MediaSelection = r.MediaSelection,
-        AutoStart = r.AutoStart,
+        AutoStart = autoStart,
+        Mirrors = r.Mirrors,
+        StartAtMs = r.StartAtMs,
+        PostAction = r.PostAction,
     };
+
+    // ---- custom categories (category_def table) ----------------------------
+    private List<object> ListCategoryDefs()
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT name, patterns, destination_dir, icon FROM category_def ORDER BY name";
+            using var r = cmd.ExecuteReader();
+            var list = new List<object>();
+            while (r.Read())
+                list.Add(new { name = r.GetString(0), patterns = r.GetString(1), destination_dir = r.GetString(2), icon = r.GetString(3) });
+            return list;
+        }
+    }
+
+    private void SaveCategoryDef(SaveCategoryRequest req)
+    {
+        _db.InTransaction<object?>(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO category_def(name, patterns, destination_dir, icon) VALUES(@n,@p,@d,@i)
+                ON CONFLICT(name) DO UPDATE SET patterns=@p, destination_dir=@d, icon=@i
+                """;
+            cmd.Parameters.AddValue("@n", req.Name.Trim().ToLowerInvariant());
+            cmd.Parameters.AddValue("@p", req.Patterns);
+            cmd.Parameters.AddValue("@d", req.DestinationDir);
+            cmd.Parameters.AddValue("@i", string.IsNullOrWhiteSpace(req.Icon) ? "folder" : req.Icon);
+            cmd.ExecuteNonQuery();
+            return null;
+        });
+    }
+
+    private void DeleteCategoryDef(string name)
+    {
+        _db.InTransaction<object?>(conn =>
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM category_def WHERE name=@n";
+            cmd.Parameters.AddValue("@n", name);
+            cmd.ExecuteNonQuery();
+            return null;
+        });
+    }
 }

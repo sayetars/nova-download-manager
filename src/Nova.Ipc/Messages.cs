@@ -26,12 +26,121 @@ public sealed class AddDownloadRequest
     public string? MediaSelection { get; set; }
     /// <summary>true → auto-start immediately (default) vs. only queue.</summary>
     public bool AutoStart { get; set; } = true;
+    /// <summary>IDM parity: fallback URLs tried in order on permanent failure.</summary>
+    public List<string>? Mirrors { get; set; }
+    /// <summary>IDM parity: per-task credentials (basic auth).</summary>
+    public string? AuthUser { get; set; }
+    public string? AuthPassword { get; set; }
+    /// <summary>Epoch-ms: start no earlier than this time (download later).</summary>
+    public long StartAtMs { get; set; }
+    /// <summary>Per-task post-completion action: "" | exit | shutdown | hibernate | sleep | logoff.</summary>
+    public string? PostAction { get; set; }
 }
 
 public sealed class BatchAddRequest
 {
     public List<AddDownloadRequest> Items { get; set; } = new();
 }
+
+/// <summary>Update editable task properties (IDM parity: properties editor).</summary>
+public sealed class UpdateTaskRequest
+{
+    public string TaskKey { get; set; } = string.Empty;
+    public string? QueueName { get; set; }
+    public int? Priority { get; set; }
+    public string? Category { get; set; }
+    public string? Referer { get; set; }
+    public int? MaxConnections { get; set; }
+    public long? SpeedCapBytes { get; set; }
+    public long? StartAtMs { get; set; }
+    public string? PostAction { get; set; }
+    public List<string>? Mirrors { get; set; }
+}
+
+/// <summary>FTP directory browser (IDM parity: FTP explorer).</summary>
+public sealed class FtpListRequest
+{
+    public string Url { get; set; } = string.Empty;
+    public string? AuthUser { get; set; }
+    public string? AuthPassword { get; set; }
+}
+
+/// <summary>ZIP preview: local (completed task) or remote via central-directory Range fetch.</summary>
+public sealed class ZipListRequest
+{
+    /// <summary>Task key of a completed local task — preferred.</summary>
+    public string? TaskKey { get; set; }
+    /// <summary>Remote archive URL (used when task not completed).</summary>
+    public string? Url { get; set; }
+    public string? Referer { get; set; }
+}
+
+public sealed class ZipExtractRequest
+{
+    public string TaskKey { get; set; } = string.Empty;
+    public List<string> Entries { get; set; } = new();
+    public string DestinationDir { get; set; } = string.Empty;
+}
+
+/// <summary>Site Grabber control (IDM parity).</summary>
+public sealed class GrabberStartRequest
+{
+    public string RootUrl { get; set; } = string.Empty;
+    public int MaxDepth { get; set; } = 3;
+    public string IncludeFilter { get; set; } = "";
+    public string ExcludeFilter { get; set; } = "";
+    public string SaveDirectory { get; set; } = "";
+    public bool FollowLinks { get; set; } = true;
+    public bool Images { get; set; } = true;
+    public bool Css { get; set; } = true;
+    public bool Scripts { get; set; }
+    public bool Video { get; set; }
+    public bool RewriteForOffline { get; set; } = true;
+}
+
+/// <summary>Login vault (IDM parity: site logins).</summary>
+public sealed class SaveLoginRequest
+{
+    public string Host { get; set; } = string.Empty;
+    public string Realm { get; set; } = "";
+    public string UserName { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public string Scheme { get; set; } = "basic";
+}
+
+public sealed class DeleteLoginRequest
+{
+    public long Id { get; set; }
+}
+
+/// <summary>Custom categories (IDM parity): name, patterns, save dir.</summary>
+public sealed class SaveCategoryRequest
+{
+    public string Name { get; set; } = string.Empty;
+    /// <summary>Comma-separated extensions and :keyword URL filters, e.g. "mp3,flac,:bandcamp".</summary>
+    public string Patterns { get; set; } = "";
+    public string DestinationDir { get; set; } = "";
+    public string Icon { get; set; } = "folder";
+}
+
+public sealed class DeleteCategoryRequest
+{
+    public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>Import/export the task list (IDM parity).</summary>
+public sealed class ImportTasksRequest
+{
+    /// <summary>JSON as produced by export_tasks.</summary>
+    public string Json { get; set; } = string.Empty;
+    public bool AutoStart { get; set; }
+}
+
+public sealed class CheckUpdateRequest
+{
+    public string UpdateUrl { get; set; } = "";
+}
+
 
 public sealed class ListTasksRequest
 {

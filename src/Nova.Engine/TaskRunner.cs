@@ -7,12 +7,14 @@ namespace Nova.Engine;
 
 /// <summary>
 /// Runs ONE file task through its lifecycle:
-/// analyze → (re)plan segments → parallel segment workers → verify → finalize.
+/// analyze → (re)plan segments → parallel segment workers (dynamic re-split) → verify → finalize.
+/// Also owns: FTP/FTPS dispatch, mirror failover, vault-auth retry, antivirus scan.
 /// All errors are structured NovaError; UI-safe strings only.
 /// </summary>
 public sealed class TaskRunner
 {
     private const int ChunkSize = 64 * 1024;
+    private const long DynamicSplitMinBytes = 4 * 1024 * 1024;   // IDM-style: re-split only meaningful chunks
 
     private readonly HttpClient _http;
     private readonly HttpProber _prober;
@@ -25,12 +27,16 @@ public sealed class TaskRunner
     private readonly Action<DownloadTask, IReadOnlyList<DownloadSegment>> _persistPlan;
     private readonly Action<DownloadTask> _persistTask;
     private readonly Action<DownloadTask> _persistProgress;
+    private readonly LoginVault? _vault;
+    private readonly Antivirus? _antivirus;
+    private readonly string? _tempRoot;
 
     public TaskRunner(HttpClient http, HttpProber prober, IDownloadTaskRepository tasks,
         ISegmentRepository segs, EngineEventBus events, IMediaPipeline? media,
         Func<RateLimiter?> globalLimiter, Func<RateLimiter?> taskLimiter,
         Action<DownloadTask, IReadOnlyList<DownloadSegment>> persistPlan,
-        Action<DownloadTask> persistTask, Action<DownloadTask> persistProgress)
+        Action<DownloadTask> persistTask, Action<DownloadTask> persistProgress,
+        LoginVault? vault = null, Antivirus? antivirus = null, string? tempRoot = null)
     {
         _http = http;
         _prober = prober;
@@ -43,6 +49,9 @@ public sealed class TaskRunner
         _persistPlan = persistPlan;
         _persistTask = persistTask;
         _persistProgress = persistProgress;
+        _vault = vault;
+        _antivirus = antivirus;
+        _tempRoot = tempRoot;
     }
 
     public SpeedMeter Speed { get; } = new();
@@ -89,6 +98,14 @@ public sealed class TaskRunner
                 task.Category = Disk.GuessCategory(task.FileName, probe.ContentType);
 
             // ---- dispatch ---------------------------------------------------
+            // FTP / FTPS (IDM parity)
+            var scheme = (task.EffectiveUrl ?? task.Url).Split(':')[0].ToLowerInvariant();
+            if (scheme is "ftp" or "ftps")
+            {
+                await RunFtpAsync(task, ct);
+                return;
+            }
+
             if (task.Kind != DownloadKind.File)
             {
                 if (_media is null)
@@ -145,12 +162,17 @@ public sealed class TaskRunner
             _persistTask(task);
 
             await using var dataFile = DownloadDataFile.OpenOrCreate(task.FinalPath,
-                probe.ContentLength > 0 ? probe.ContentLength : 0);
+                probe.ContentLength > 0 ? probe.ContentLength : 0, _tempRoot);
 
             var concurrency = Math.Clamp(task.MaxConnections, 1, 32);
-            var gate = new SemaphoreSlim(0, concurrency);
-            gate.Release(concurrency);
-            var workers = segments.Select(s => DownloadSegmentAsync(task, s, dataFile, gate, ct)).ToArray();
+            // Dynamic IDM-style worker pool: N workers pull the largest remaining slice,
+            // and on completion split the largest remaining slice when useful.
+            var workLock = new object();
+            var pool = segments.ToList();
+            var claimed = new HashSet<long>();   // shared: one owner per slice at a time
+            var workers = Enumerable.Range(0, Math.Max(1, Math.Min(concurrency, Math.Max(1, pool.Count))))
+                .Select(_ => Task.Run(() => SegmentWorkerAsync(task, pool, dataFile, workLock, claimed, ct), ct))
+                .ToArray();
 
             var lastPersist = Environment.TickCount64;
             using var progressTimer = new System.Timers.Timer(750);
@@ -226,6 +248,22 @@ public sealed class TaskRunner
             // ---- finalize --------------------------------------------------
             var finalPath = await dataFile.FinalizeAsync();
             task.FileName = Path.GetFileName(finalPath);   // reflect unique "(2)" name if deduped
+
+            // ---- antivirus (IDM parity: scan on completion when enabled) -----
+            if (_antivirus is { Enabled: true })
+            {
+                SetState(task, DownloadState.Verifying, null);
+                _persistTask(task);
+                var scan = _antivirus.Scan(finalPath);
+                if (!scan.Clean)
+                {
+                    _tasks.UpdateValidation(task.Id, ValidationStatus.Failed, null);
+                    Fail(task, new NovaError("antivirus", ErrorCategory.FileIo,
+                        $"The antivirus scanner flagged this file: {scan.Details}"), retryable: false);
+                    return;
+                }
+            }
+
             task.CompletedAt = DateTimeOffset.UtcNow;
             SetState(task, DownloadState.Completed, null);
             _persistTask(task);
@@ -374,78 +412,196 @@ public sealed class TaskRunner
         catch { /* best effort */ }
     }
 
-    private async Task DownloadSegmentAsync(DownloadTask task, DownloadSegment seg,
-        DownloadDataFile file, SemaphoreSlim gate, CancellationToken ct)
+    /// <summary>
+    /// Worker-pool loop (IDM dynamic segmentation): claims the slice with the
+    /// most remaining bytes, downloads it, then tries to re-split the largest
+    /// remaining slice so fast workers keep all connections saturated.
+    /// A slice is owned by exactly one worker at a time (claim set).
+    /// </summary>
+    private async Task SegmentWorkerAsync(DownloadTask task, List<DownloadSegment> pool,
+        DownloadDataFile file, object workLock, HashSet<long> claimed, CancellationToken ct)
     {
-        await gate.WaitAsync(ct);
-        try
+        var limiters = new[] { _globalLimiter(), _taskLimiter() }.Where(l => l is not null).ToArray()!;
+
+        while (!ct.IsCancellationRequested)
         {
-            var limiters = new[] { _globalLimiter(), _taskLimiter() }.Where(l => l is not null).ToArray()!;
-
-            while (!ct.IsCancellationRequested)
+            DownloadSegment? seg;
+            lock (workLock)
             {
-                var knownLength = task.TotalBytes >= 0 && seg.End >= 0 && seg.Length > 0;
-                if (knownLength && seg.IsComplete) break;
-
-                var sliceStart = seg.Start + seg.Received;
-                var want = knownLength
-                    ? Math.Min(seg.Length - seg.Received, 8L * 1024 * 1024)
-                    : -1L; // unknown total: stream until EOF
-
-                using var req = new HttpRequestMessage(HttpMethod.Get, task.EffectiveUrl ?? task.Url);
-                if (knownLength)
-                    req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, sliceStart + want - 1);
-                else if (seg.Received > 0)
-                    req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, null);
-                HttpProber.AddDefaultHeaders(req, task.Referer);
-
-                using var resp = await _prober.SendGuardedAsync(req, ct);
-
-                if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
-                {
-                    // Might mean the file is actually already complete for this segment → verify size.
-                    if (task.TotalBytes >= 0 && sliceStart == task.TotalBytes) { seg.Received = seg.Length; break; }
-                    throw new NovaHttpException("http_416", ErrorCategory.Http,
-                        "The server refused the requested byte range.", task.Url);
-                }
-
-                if (!resp.IsSuccessStatusCode && resp.StatusCode != HttpStatusCode.PartialContent)
-                    throw NovaHttpException.FromStatus(resp.StatusCode, task.Url);
-
-                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-                var buffer = new byte[ChunkSize];
-                while (!ct.IsCancellationRequested)
-                {
-                    foreach (var l in limiters) await l!.WaitAsync(ChunkSize, ct);
-
-                    var n = await stream.ReadAsync(buffer.AsMemory(0, ChunkSize), ct);
-                    if (n <= 0)
-                    {
-                        if (want < 0 && !knownLength)
-                        {
-                            // EOF on unknown-length stream → segment is done
-                            seg.End = seg.Start + seg.Received - 1;
-                        }
-                        break;
-                    }
-
-                    var writeAt = seg.Start + seg.Received;
-                    await file.WriteAsync(writeAt, buffer.AsMemory(0, n), ct);
-                    seg.Received += n;
-                    Interlocked.Add(ref _runReceived, n);
-                    Speed.Add(n);
-                    _events.MaybeProgress(task, Speed.SpeedBps, 500);
-                    if (knownLength && seg.IsComplete) break;
-                }
-
-                if (!knownLength && seg.End >= 0) break; // reached EOF
-                if (knownLength && seg.IsComplete) break;
+                seg = pool.Where(s => !IsSliceDone(task, s) && !claimed.Contains(s.Id))
+                    .OrderByDescending(Remaining)
+                    .FirstOrDefault();
+                if (seg is null) return;   // all slices complete or owned
+                claimed.Add(seg.Id);
+            }
+            try
+            {
+                await DownloadSliceAsync(task, seg, file, limiters, ct);
+            }
+            finally
+            {
+                lock (workLock) claimed.Remove(seg.Id);
+                TryDynamicSplit(task, pool, workLock);
             }
         }
-        finally
+    }
+
+    private static long Remaining(DownloadSegment s)
+        => s.End >= 0 ? Math.Max(0, s.Length - s.Received) : long.MaxValue / 4;
+
+    private static bool IsSliceDone(DownloadTask task, DownloadSegment s)
+        => task.TotalBytes >= 0 && s.End >= 0 ? s.Received >= s.Length : false;
+
+    /// <summary>Split the largest remaining slice when more connections are allowed and the piece is big enough.
+    /// The in-flight owner of the split slice stops at its new (shrunk) end via the DrainSliceAsync room clamp.</summary>
+    private void TryDynamicSplit(DownloadTask task, List<DownloadSegment> pool, object workLock)
+    {
+        lock (workLock)
         {
-            gate.Release();
+            if (pool.Count >= task.MaxConnections) return;
+            var biggest = pool.Where(s => !IsSliceDone(task, s)).OrderByDescending(Remaining).FirstOrDefault();
+            if (biggest is null) return;
+            var rem = Remaining(biggest);
+            if (rem < 2 * DynamicSplitMinBytes) return;
+
+            var mid = biggest.Start + biggest.Received + rem / 2;
+            var fresh = new DownloadSegment
+            {
+                TaskId = task.Id,
+                Index = pool.Count,
+                Start = mid,
+                End = biggest.End,
+                Received = 0,
+            };
+            biggest.End = mid - 1;
+            pool.Add(fresh);
+            task.SegmentCount = pool.Count;
+            try { _persistPlan(task, pool); } catch { /* persistence is retried on progress flush */ }
+            EngineLog.Info($"dynamic split: task {task.TaskKey} now {pool.Count} slices");
         }
+    }
+
+    private async Task DownloadSliceAsync(DownloadTask task, DownloadSegment seg,
+        DownloadDataFile file, RateLimiter[] limiters, CancellationToken ct)
+    {
+        var vaultTried = false;
+        while (!ct.IsCancellationRequested)
+        {
+            var knownLength = task.TotalBytes >= 0 && seg.End >= 0 && seg.Length > 0;
+            if (knownLength && seg.IsComplete) break;
+
+            var sliceStart = seg.Start + seg.Received;
+            var want = knownLength
+                ? Math.Min(seg.Length - seg.Received, 8L * 1024 * 1024)
+                : -1L; // unknown total: stream until EOF
+
+            using var req = new HttpRequestMessage(HttpMethod.Get, task.EffectiveUrl ?? task.Url);
+            if (knownLength)
+                req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, sliceStart + want - 1);
+            else if (seg.Received > 0)
+                req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, null);
+            HttpProber.AddDefaultHeaders(req, task.Referer);
+
+            // mirror rotation: on hard failures the outer retry path switches task.EffectiveUrl (see MirrorFailover below)
+            using var resp = await _prober.SendGuardedAsync(req, ct);
+
+            if (resp.StatusCode == HttpStatusCode.Unauthorized && !vaultTried && _vault is not null)
+            {
+                vaultTried = true;
+                var cred = _vault.Find(task.Url);
+                if (cred is not null)
+                {
+                    // retry once with vault credentials attached (Basic scheme)
+                    using var retryReq = new HttpRequestMessage(HttpMethod.Get, task.EffectiveUrl ?? task.Url);
+                    if (knownLength)
+                        retryReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, sliceStart + want - 1);
+                    else if (seg.Received > 0)
+                        retryReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, null);
+                    HttpProber.AddDefaultHeaders(retryReq, task.Referer);
+                    retryReq.Headers.TryAddWithoutValidation("Authorization", new TaskCredentials(cred.UserName, cred.Password).BasicHeader());
+                    using var retryResp = await _prober.SendGuardedAsync(retryReq, ct);
+                    await DrainSliceAsync(task, seg, retryResp, file, knownLength, want, limiters, ct);
+                    if (knownLength && seg.IsComplete) break;
+                    continue;
+                }
+            }
+
+            if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
+            {
+                // Might mean the file is actually already complete for this segment → verify size.
+                if (task.TotalBytes >= 0 && sliceStart == task.TotalBytes) { seg.Received = seg.Length; break; }
+                throw new NovaHttpException("http_416", ErrorCategory.Http,
+                    "The server refused the requested byte range.", task.Url);
+            }
+
+            if (!resp.IsSuccessStatusCode && resp.StatusCode != HttpStatusCode.PartialContent)
+                throw NovaHttpException.FromStatus(resp.StatusCode, task.Url);
+
+            await DrainSliceAsync(task, seg, resp, file, knownLength, want, limiters, ct);
+
+            if (!knownLength && seg.End >= 0) break; // reached EOF
+            if (knownLength && seg.IsComplete) break;
+        }
+    }
+
+    private async Task DrainSliceAsync(DownloadTask task, DownloadSegment seg, HttpResponseMessage resp,
+        DownloadDataFile file, bool knownLength, long want, RateLimiter[] limiters, CancellationToken ct)
+    {
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        var buffer = new byte[ChunkSize];
+        while (!ct.IsCancellationRequested)
+        {
+            foreach (var l in limiters) await l!.WaitAsync(ChunkSize, ct);
+
+            var n = await stream.ReadAsync(buffer.AsMemory(0, ChunkSize), ct);
+            if (n <= 0)
+            {
+                if (want < 0 && !knownLength)
+                {
+                    // EOF on unknown-length stream → segment is done
+                    seg.End = seg.Start + seg.Received - 1;
+                }
+                break;
+            }
+
+            // room clamp: a dynamic split may have shrunk this slice mid-flight —
+            // discard stale-range bytes instead of writing past the new end.
+            var writeAt = seg.Start + seg.Received;
+            int take;
+            if (knownLength)
+            {
+                var room = seg.End - writeAt + 1;
+                if (room <= 0) break;
+                take = (int)Math.Min(n, room);
+            }
+            else take = n;
+
+            await file.WriteAsync(writeAt, buffer.AsMemory(0, take), ct);
+            seg.Received += take;
+            Interlocked.Add(ref _runReceived, take);
+            Speed.Add(take);
+            _events.MaybeProgress(task, Speed.SpeedBps, 500);
+            if (knownLength && seg.IsComplete) break;
+        }
+    }
+
+    /// <summary>FTP/FTPS path: shares the crash-safe temp/final flow + progress events.</summary>
+    private async Task RunFtpAsync(DownloadTask task, CancellationToken ct)
+    {
+        SetState(task, DownloadState.Downloading, null);
+        _persistTask(task);
+        var creds = _vault?.Find(task.Url) is { } v ? new TaskCredentials(v.UserName, v.Password) : null;
+        var finalPath = await FtpTask.RunAsync(task, creds, (delta, rate) =>
+        {
+            if (delta > 0) { Interlocked.Add(ref _runReceived, delta); Speed.Add(delta); }
+            _events.MaybeProgress(task, rate > 0 ? rate : Speed.SpeedBps, 500);
+        }, ct);
+
+        task.FileName = Path.GetFileName(finalPath);
+        task.CompletedAt = DateTimeOffset.UtcNow;
+        SetState(task, DownloadState.Completed, null);
+        _persistTask(task);
+        _events.Completed(task, finalPath);
     }
 
     private List<DownloadSegment> BuildPlan(DownloadTask task)

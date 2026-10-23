@@ -85,7 +85,19 @@ public sealed class DownloadTask
 
     public bool IsSpeedCapped { get; set; }
 
+    /// <summary>Fallback URLs tried in order when the primary fails permanently (IDM mirrors).</summary>
+    public string MirrorUrls { get; set; } = string.Empty;   // newline-separated
+
+    /// <summary>Epoch-ms before which the scheduler must not start this task (0 = now).</summary>
+    public long StartAtMs { get; set; }
+
+    /// <summary>Per-task post-completion action (empty | exit | shutdown | hibernate | sleep | logoff).</summary>
+    public string PostAction { get; set; } = string.Empty;
+
     [JsonIgnore] public bool HasSpeedCap => SpeedCapBytes > 0;
+
+    [JsonIgnore] public IReadOnlyList<string> Mirrors =>
+        MirrorUrls.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     [JsonIgnore] public bool IsRunning =>
         State is DownloadState.Analyzing or DownloadState.Downloading

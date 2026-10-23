@@ -398,12 +398,18 @@ class _RemoveDialogState extends State<_RemoveDialog> {
   }
 }
 
-/// Add-download dialog (Ctrl+N / toolbar).
-Future<void> showAddDownloadDialog(BuildContext context) async {
+/// Add-download dialog (Ctrl+N / toolbar) — IDM parity edition:
+/// multi-line batch, [01-99] pattern preview, 32-connection chips,
+/// download-later start time and mirror URLs.
+Future<void> showAddDownloadDialog(BuildContext context, {String? prefillUrl}) async {
   final s = S.of(context);
-  final urlCtrl = TextEditingController();
+  final urlCtrl = TextEditingController(text: prefillUrl ?? '');
   final fileCtrl = TextEditingController();
+  final mirrorsCtrl = TextEditingController();
+  final startAtCtrl = TextEditingController();
   var connections = 4;
+  var downloadLater = false;
+  List<String>? previewUrls;
 
   await showDialog(
     context: context,
@@ -411,39 +417,104 @@ Future<void> showAddDownloadDialog(BuildContext context) async {
       builder: (context, setState) => AlertDialog(
         title: Text(s.addDownload),
         content: SizedBox(
-          width: 480,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: urlCtrl,
-                autofocus: true,
-                decoration: InputDecoration(labelText: s.urlLabel, hintText: s.urlHint),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: fileCtrl,
-                decoration: InputDecoration(labelText: '${s.fileName} (${s.none})'),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Text(s.connections, style: Theme.of(context).textTheme.labelLarge),
-                  const Spacer(),
-                  for (final c in [1, 2, 4, 8, 16])
-                    Padding(
-                      padding: const EdgeInsets.only(left: 6, right: 6),
-                      child: ChoiceChip(
-                        label: Text('$c'),
-                        selected: connections == c,
-                        onSelected: (_) => setState(() => connections = c),
-                        visualDensity: VisualDensity.compact,
+          width: 560,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: urlCtrl,
+                  autofocus: true,
+                  maxLines: 4,
+                  minLines: 1,
+                  decoration: InputDecoration(
+                    labelText: s.urlLabel,
+                    hintText: s.urlHint,
+                    helperText: s.batchHint,
+                  ),
+                  onChanged: (v) => setState(() => previewUrls = null),
+                ),
+                if (urlCtrl.text.contains('[') && previewUrls == null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: TextButton.icon(
+                        icon: const Icon(Icons.expand_circle_down_outlined, size: 16),
+                        label: Text('${s.preview} ${s.urls}'),
+                        onPressed: () async {
+                          final urls = await ProviderScope.containerOf(context, listen: false)
+                              .read(prov.tasksProvider.notifier)
+                              .expandPattern(urlCtrl.text.trim());
+                          if (context.mounted) setState(() => previewUrls = urls.take(20).toList());
+                        },
                       ),
                     ),
-                ],
-              ),
-            ],
+                  ),
+                if (previewUrls != null)
+                  Container(
+                    height: 120,
+                    margin: const EdgeInsets.only(top: 8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: .4),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ListView.builder(
+                      itemCount: previewUrls!.length,
+                      itemBuilder: (_, i) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                        child: Text(previewUrls![i], style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: fileCtrl,
+                  decoration: InputDecoration(labelText: '${s.fileName} (${s.none})'),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Text(s.connections, style: Theme.of(context).textTheme.labelLarge),
+                    const Spacer(),
+                    for (final c in [1, 2, 4, 8, 16, 24, 32])
+                      Padding(
+                        padding: const EdgeInsets.only(left: 4, right: 4),
+                        child: ChoiceChip(
+                          label: Text('$c'),
+                          selected: connections == c,
+                          onSelected: (_) => setState(() => connections = c),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text(s.downloadLater),
+                  value: downloadLater,
+                  onChanged: (v) => setState(() => downloadLater = v),
+                ),
+                if (downloadLater)
+                  TextField(
+                    controller: startAtCtrl,
+                    decoration: InputDecoration(
+                      labelText: s.startAt,
+                      hintText: '2026-01-01 22:30',
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: mirrorsCtrl,
+                  maxLines: 3,
+                  minLines: 1,
+                  decoration: InputDecoration(labelText: s.mirrors, helperText: s.mirrorsHint),
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -458,18 +529,49 @@ Future<void> showAddDownloadDialog(BuildContext context) async {
     ),
   ).then((ok) async {
     if (ok == true && context.mounted) {
-      final url = urlCtrl.text.trim();
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      final notifier = ProviderScope.containerOf(context, listen: false)
+          .read(prov.tasksProvider.notifier);
+      var urls = urlCtrl.text
+          .split(RegExp(r'[\r\n]+'))
+          .map((u) => u.trim())
+          .where((u) => u.isNotEmpty)
+          .toList();
+      // allow space-separated single-line pastes too
+      if (urls.length == 1 && urls.first.contains(' ')) {
+        urls = urls.first.split(RegExp(r'\s+')).where((u) => u.isNotEmpty).toList();
+      }
+      final valid = urls
+          .where((u) => u.startsWith('http://') || u.startsWith('https://') || u.startsWith('ftp://') || u.startsWith('ftps://'))
+          .toList();
+      if (valid.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.of(context).invalidUrl)));
         return;
       }
-      await ProviderScope.containerOf(context, listen: false)
-          .read(prov.tasksProvider.notifier)
-          .addDownload(
-            url: url,
+
+      int? startAtMs;
+      if (downloadLater && startAtCtrl.text.trim().isNotEmpty) {
+        final dt = DateTime.tryParse(startAtCtrl.text.trim());
+        if (dt != null) startAtMs = dt.millisecondsSinceEpoch;
+      }
+      final mirrors = mirrorsCtrl.text
+          .split(RegExp(r'[\r\n]+'))
+          .map((m) => m.trim())
+          .where((m) => m.isNotEmpty)
+          .toList();
+
+      if (valid.length == 1) {
+        await notifier.addDownload(
+          url: valid.first,
+          fileName: fileCtrl.text.trim().isEmpty ? null : fileCtrl.text.trim(),
+          maxConnections: connections,
+          mirrors: mirrors,
+          startAtMs: startAtMs,
+        );
+      } else {
+        await notifier.addBatch(valid,
             fileName: fileCtrl.text.trim().isEmpty ? null : fileCtrl.text.trim(),
-            maxConnections: connections,
-          );
+            maxConnections: connections);
+      }
       if (context.mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(S.of(context).added)));
@@ -477,6 +579,8 @@ Future<void> showAddDownloadDialog(BuildContext context) async {
     }
     urlCtrl.dispose();
     fileCtrl.dispose();
+    mirrorsCtrl.dispose();
+    startAtCtrl.dispose();
   });
 }
 

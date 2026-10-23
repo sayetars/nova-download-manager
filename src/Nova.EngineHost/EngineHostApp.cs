@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
 using Nova.Domain;
 using Nova.Engine;
+using Nova.Grabber;
 using Nova.Ipc;
 using Nova.Media;
 using Nova.Persistence;
@@ -27,6 +28,11 @@ public sealed class EngineHostApp : IAsyncDisposable
     private readonly HttpClient _http;
     private readonly string _dataDir;
     private readonly DateTime _startedAt = DateTime.UtcNow;
+    private readonly LoginVault _vault;
+    private readonly GrabberService _grabber;
+    private readonly System.Timers.Timer _postActionTimer;
+    private string _pendingPostAction = "";
+    private bool _postActionCancelled;
 
     public static string DefaultDataDir()
     {
@@ -46,20 +52,90 @@ public sealed class EngineHostApp : IAsyncDisposable
         _db = _dbInstance!;
 
         _http = CreateHttpClient();
+        _vault = new LoginVault(_db, _dataDir);
+        _grabber = new GrabberService(_db);
+        var antivirus = new Antivirus(
+            enabled: _settings.Get("av.enabled") == "true",
+            command: _settings.Get("av.command"));
+        var tempRoot = _settings.Get("engine.temp_dir");
         _engine = new DownloadEngine(
             new DownloadTaskRepository(_db), new SegmentRepository(_db),
             new QueueRepository(_db), _settings, new EngineEventBus(),
             _http, downloads, defaultConnections: 4,
-            media: new MediaPipeline());
+            media: new MediaPipeline(), vault: _vault, antivirus: antivirus, tempRoot: tempRoot);
+        _engineHttpClient = _http;
 
         _scheduler = new SchedulerService(_engine, _settings, new QueueRepository(_db));
         _scheduler.SchedulerStateChanged += s => _ipc?.Broadcast("engine_status", BuildStatus());
         _mediaProbe = new MediaCandidatesService(_http);
 
-        _router = new IpcMessageRouter(_engine, _scheduler, _settings, new QueueRepository(_db), _mediaProbe, _db, _dataDir, downloads);
+        _router = new IpcMessageRouter(_engine, _scheduler, _settings, new QueueRepository(_db), _mediaProbe, _db, _dataDir, downloads, _vault, _grabber, _http, RequestShutdown);
         var token = EnsureAuthToken();
         _ipc = new IpcServer(_router, token);
         _router.Server = _ipc;
+
+        // post-completion actions + sync-queue re-check, once a minute
+        _postActionTimer = new System.Timers.Timer(TimeSpan.FromSeconds(20)) { AutoReset = true };
+        _postActionTimer.Elapsed += (_, _) => EvaluatePostAction();
+        _postActionTimer.Start();
+    }
+
+    /// <summary>Cancels a pending post-completion action (user clicked "stay on").</summary>
+    internal void CancelPostAction()
+    {
+        _postActionCancelled = true;
+        _pendingPostAction = "";
+    }
+
+    private void RequestShutdown()
+    {
+        // engine exit requested (post action "exit")
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(500);
+            Environment.Exit(0);
+        });
+    }
+
+    private void EvaluatePostAction()
+    {
+        try
+        {
+            var all = _engine.All();
+            var anyActive = all.Any(t => t.State is DownloadState.Downloading or DownloadState.Queued
+                or DownloadState.Analyzing or DownloadState.Verifying or DownloadState.Pausing or DownloadState.Retrying
+                or DownloadState.Paused);
+
+            var requested = all.FirstOrDefault(t => t.State == DownloadState.Completed &&
+                !string.IsNullOrEmpty(t.PostAction))?.PostAction;
+            var globalAction = _settings.Get("engine.post_action");
+            var action = requested ?? (string.IsNullOrEmpty(globalAction) ? null : globalAction);
+            if (string.IsNullOrEmpty(action) || !PostActionRunner.IsValid(action)) return;
+
+            if (anyActive)
+            {
+                _pendingPostAction = "";
+                return;
+            }
+
+            // all downloads finished → fire after a grace window, unless cancelled
+            if (_pendingPostAction != action)
+            {
+                _pendingPostAction = action;
+                _postActionCancelled = false;
+                _ipc.Broadcast("post_action_scheduled", new { action, grace_seconds = 15 });
+                EngineLog.Info($"post action '{action}' scheduled in 15s (send cancel_post_action to abort)");
+                return;
+            }
+            if (_postActionCancelled) return;
+
+            _pendingPostAction = "";
+            PostActionRunner.Execute(action, RequestShutdown, s => EngineLog.Info(s));
+        }
+        catch (Exception ex)
+        {
+            EngineLog.Warn($"post-action eval failed: {ex.Message}");
+        }
     }
 
     private NovaDatabase? _dbInstance;
@@ -94,8 +170,13 @@ public sealed class EngineHostApp : IAsyncDisposable
         }
     }
 
-    private static HttpClient CreateHttpClient()
+    private readonly HttpClient _engineHttpClient;
+
+    /// <summary>Engine-wide HttpClient with the user's proxy settings applied (proxy.* keys).</summary>
+    private HttpClient CreateHttpClient()
     {
+        var all = _settings.GetAll();
+        var proxy = ProxyConfig.FromSettings(k => all.TryGetValue(k, out var v) ? v : null);
         var handler = new SocketsHttpHandler
         {
             AllowAutoRedirect = false, // we do redirects ourselves to strip auth cross-origin
@@ -105,6 +186,8 @@ public sealed class EngineHostApp : IAsyncDisposable
             MaxConnectionsPerServer = 64,
             PooledConnectionLifetime = TimeSpan.FromMinutes(10),
         };
+        if (proxy.IsValid)
+            proxy.Apply(handler, "*");   // host-level bypass handled by WebProxy.BypassList
         return new HttpClient(new SafeRedirectHandler(handler)) { Timeout = Timeout.InfiniteTimeSpan };
     }
 
@@ -154,6 +237,23 @@ public sealed class EngineHostApp : IAsyncDisposable
         EngineLog.Info($"Nova engine listening on pipe '{Protocol.PipeName}' (data: {_dataDir})");
     }
 
+    /// <summary>Proxy-aware client factory: used by the router for FTP browsing, grabber and remote ZIP preview.</summary>
+    internal HttpClient BuildConfiguredClient()
+    {
+        var settings = _settings.GetAll();
+        var proxy = ProxyConfig.FromSettings(k => settings.TryGetValue(k, out var v) ? v : null);
+        var handler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = true,
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+            AutomaticDecompression = DecompressionMethods.None,
+            MaxConnectionsPerServer = 64,
+        };
+        if (proxy.IsValid)
+            proxy.Apply(handler, "*");   // bypass decided per-request by ProxyConfig.IsBypassed
+        return new HttpClient(new SafeRedirectHandler(handler)) { Timeout = Timeout.InfiniteTimeSpan };
+    }
+
     private object BuildStatus()
     {
         var active = _engine.All().Count(t => t.State is DownloadState.Downloading or DownloadState.Analyzing
@@ -170,6 +270,8 @@ public sealed class EngineHostApp : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _postActionTimer.Stop();
+        _postActionTimer.Dispose();
         await _ipc.DisposeAsync();
         _scheduler.Dispose();
         await _engine.DisposeAsync();

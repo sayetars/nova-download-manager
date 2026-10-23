@@ -122,4 +122,141 @@ function observeDom(): void {
   observer.observe(document.documentElement, { childList: true, subtree: true });
 }
 
+// ---- IDM parity: "Download ALL links" selection dialog ------------------------
+
+const DOC_RE = /\.(pdf|docx?|xlsx?|pptx?|odt|txt|epub)(\?|$)/i;
+const MEDIA_RE = /\.(mp4|mkv|webm|mov|avi|m4v|mp3|flac|wav|m4a|ogg)(\?|$)/i;
+const ARCHIVE_RE = /\.(zip|rar|7z|tar|gz|bz2|xz|iso)(\?|$)/i;
+
+function collectLinks(): { url: string; text: string; group: 'documents' | 'media' | 'archives' | 'other' }[] {
+  const out: { url: string; text: string; group: 'documents' | 'media' | 'archives' | 'other' }[] = [];
+  const seen = new Set<string>();
+  for (const a of document.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+    const href = a.href;
+    if (!/^https?:/i.test(href) || seen.has(href)) continue;
+    seen.add(href);
+    const group = DOC_RE.test(href) ? 'documents'
+      : MEDIA_RE.test(href) ? 'media'
+      : ARCHIVE_RE.test(href) ? 'archives'
+      : 'other';
+    out.push({ url: href, text: (a.textContent ?? '').trim().slice(0, 80), group });
+  }
+  return out;
+}
+
+function openLinksDialog(): void {
+  if (document.getElementById('nova-links-panel')) return;
+  const links = collectLinks().slice(0, 500);
+  const panel = document.createElement('div');
+  panel.id = 'nova-links-panel';
+  Object.assign(panel.style, {
+    position: 'fixed', zIndex: '2147483647', inset: 'auto 16px 16px auto', top: '16px',
+    left: '16px', right: '16px', bottom: '16px',
+    background: '#0f172a', color: '#e2e8f0', borderRadius: '14px',
+    fontFamily: 'system-ui,Segoe UI,sans-serif', fontSize: '13px',
+    display: 'flex', flexDirection: 'column', boxShadow: '0 12px 48px rgba(0,0,0,.5)',
+    border: '1px solid #334155', direction: 'ltr',
+  } as CSSStyleDeclaration);
+
+  const head = document.createElement('div');
+  head.style.cssText = 'display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #334155';
+  head.innerHTML = '<b style="font-size:14px">Nova — links on this page</b>';
+  const close = document.createElement('span');
+  close.textContent = '✕';
+  close.style.cssText = 'cursor:pointer;font-size:16px;margin-left:auto';
+  close.onclick = () => panel.remove();
+  head.appendChild(close);
+  panel.appendChild(head);
+
+  let filter: 'all' | 'documents' | 'media' | 'archives' = 'all';
+  const chips = document.createElement('div');
+  chips.style.cssText = 'display:flex;gap:8px;padding:10px 16px;flex-wrap:wrap';
+  const bodyWrap = document.createElement('div');
+  bodyWrap.style.cssText = 'flex:1;overflow:auto;padding:6px 10px';
+
+  const footer = document.createElement('div');
+  footer.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid #334155';
+  const count = document.createElement('span');
+  count.style.cssText = 'color:#94a3b8;font-size:12px';
+  const allNone = document.createElement('button');
+  allNone.textContent = 'All / none';
+  allNone.style.cssText = 'background:#334155;color:#e2e8f0;border:0;border-radius:8px;padding:7px 12px;cursor:pointer';
+  const go = document.createElement('button');
+  go.textContent = 'Download selected';
+  go.style.cssText = 'background:#2563eb;color:#fff;border:0;border-radius:8px;padding:8px 16px;cursor:pointer;font-weight:600;margin-left:auto';
+  footer.append(allNone, count, go);
+  panel.append(chips, bodyWrap, footer);
+  document.documentElement.appendChild(panel);
+
+  const boxes = new Map<string, HTMLInputElement>();
+  function render(): void {
+    bodyWrap.innerHTML = '';
+    boxes.clear();
+    let shown = 0;
+    for (const l of links) {
+      if (filter !== 'all' && l.group !== filter && !(filter === 'media' && l.group === 'other')) continue;
+      shown++;
+      const row = document.createElement('label');
+      row.style.cssText = 'display:flex;gap:10px;align-items:center;padding:7px 10px;border-radius:8px;cursor:pointer';
+      row.onmouseenter = () => (row.style.background = '#1e293b');
+      row.onmouseleave = () => (row.style.background = '');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = true;
+      const name = document.createElement('div');
+      name.style.cssText = 'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      name.textContent = l.text || l.url.split('/').pop() || l.url;
+      const grp = document.createElement('span');
+      grp.style.cssText = 'color:#64748b;font-size:11px';
+      grp.textContent = l.group;
+      row.append(cb, name, grp);
+      bodyWrap.appendChild(row);
+      boxes.set(l.url, cb);
+    }
+    count.textContent = `${shown} shown`;
+  }
+  for (const f of ['all', 'documents', 'media', 'archives'] as const) {
+    const chip = document.createElement('button');
+    chip.textContent = f;
+    chip.style.cssText = `background:${f === 'all' ? '#2563eb' : '#334155'};color:#fff;border:0;border-radius:999px;padding:6px 14px;cursor:pointer`;
+    chip.onclick = () => {
+      filter = f;
+      for (const c of chips.children) (c as HTMLElement).style.background = '#334155';
+      chip.style.background = '#2563eb';
+      render();
+    };
+    chips.appendChild(chip);
+  }
+  let allOn = true;
+  allNone.onclick = () => {
+    allOn = !allOn;
+    for (const cb of boxes.values()) cb.checked = allOn;
+  };
+  go.onclick = () => {
+    const urls = [...boxes.entries()].filter(([, cb]) => cb.checked).map(([u]) => u);
+    void callBackground({ type: 'add-downloads', urls, referer: location.href });
+    panel.remove();
+  };
+  render();
+}
+
+browser.runtime.onMessage.addListener((msg: { type?: string }) => {
+  if (msg?.type === 'nova-open-links-dialog') openLinksDialog();
+});
+
+// ---- IDM parity: special keys — Alt+click forces "download with Nova" -------
+document.addEventListener(
+  'click',
+  (e) => {
+    if (!e.altKey || e.defaultPrevented) return;
+    const a = (e.target as HTMLElement | null)?.closest?.('a[href]');
+    if (!a || !settings?.enabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    void callBackground({ type: 'add-download', url: (a as HTMLAnchorElement).href, referer: location.href });
+  },
+  true,
+);
+
 void init();
+

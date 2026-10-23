@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="FluentFTP" Version="50.0.1" />
     <ProjectReference Include="..\Nova.Domain\Nova.Domain.csproj" />
     <ProjectReference Include="..\Nova.Persistence\Nova.Persistence.csproj" />
   </ItemGroup>

@@ -62,7 +62,11 @@ public class DownloadEngineTests : IAsyncLifetime
         var task = _fx.Engine.Get(key)!;
         Assert.Equal(4, task.SegmentCount); // 8MB / 512KB → min(4, 16) = 4 segments
         var got = await File.ReadAllBytesAsync(task.FinalPath);
-        Assert.True(data.SequenceEqual(got));
+        if (!data.SequenceEqual(got))
+        {
+            var first = Enumerable.Range(0, Math.Min(data.Length, got.Length)).First(i => data[i] != got[i]);
+            Assert.Fail($"content mismatch at {first}: expected {data[first]:X2} got {got[first]:X2}; len exp={data.Length} got={got.Length}");
+        }
     }
 
     // 3. no range support -------------------------------------------------------

@@ -22,6 +22,9 @@ public sealed class DownloadEngine : IAsyncDisposable
     private readonly HttpProber _prober;
     private readonly string _defaultDir;
     private readonly int _defaultConnections;
+    private readonly LoginVault? _vault;
+    private readonly Antivirus? _antivirus;
+    private readonly string? _tempRoot;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly System.Timers.Timer _retryTimer;
     private RateLimiter? _globalLimiter;
@@ -45,7 +48,8 @@ public sealed class DownloadEngine : IAsyncDisposable
     public DownloadEngine(IDownloadTaskRepository repo, ISegmentRepository segs,
         IQueueRepository queues, ISettingsRepository settings, EngineEventBus events,
         HttpClient http, string defaultDir, int defaultConnections = 4,
-        IMediaPipeline? media = null)
+        IMediaPipeline? media = null, LoginVault? vault = null,
+        Antivirus? antivirus = null, string? tempRoot = null)
     {
         _repo = repo;
         _segs = segs;
@@ -56,6 +60,9 @@ public sealed class DownloadEngine : IAsyncDisposable
         _http = http;
         _defaultDir = defaultDir;
         _defaultConnections = defaultConnections;
+        _vault = vault;
+        _antivirus = antivirus;
+        _tempRoot = string.IsNullOrWhiteSpace(tempRoot) ? null : tempRoot;
         _prober = new HttpProber(http);
         UpdateGlobalRateCap(ParseLong(settings.Get("engine.global_speed_cap")));
         _events.Subscribe(new EngineSelfSink(this));
@@ -124,9 +131,9 @@ public sealed class DownloadEngine : IAsyncDisposable
     public Result<AddDownloadOutcome> Add(NewDownload spec)
     {
         if (string.IsNullOrWhiteSpace(spec.Url) || !Uri.TryCreate(spec.Url, UriKind.Absolute, out var uri)
-            || (uri.Scheme != "http" && uri.Scheme != "https"))
+            || (uri.Scheme != "http" && uri.Scheme != "https" && uri.Scheme != "ftp" && uri.Scheme != "ftps"))
             return Result<AddDownloadOutcome>.Fail("bad_url", ErrorCategory.Protocol,
-                "The link is not a valid HTTP(S) URL.");
+                "The link is not a valid HTTP(S)/FTP(S) URL.");
 
         // dedupe: same URL already tracked & not terminal-failed
         var dup = _tasks.Values.FirstOrDefault(e =>
@@ -148,8 +155,12 @@ public sealed class DownloadEngine : IAsyncDisposable
             Referer = spec.Referer,
             ExpectedSha256 = spec.ExpectedSha256,
             MaxConnections = Math.Clamp(spec.MaxConnections ?? _defaultConnections, 1, 32),
+            SpeedCapBytes = spec.SpeedCapBytes,
             Priority = spec.Priority,
             MediaSelection = spec.MediaSelection,
+            MirrorUrls = string.Join('\n', spec.Mirrors ?? Array.Empty<string>()),
+            StartAtMs = spec.StartAtMs,
+            PostAction = spec.PostAction ?? "",
             State = DownloadState.Created,
         };
         task.Id = _repo.Insert(task);
@@ -300,10 +311,11 @@ public sealed class DownloadEngine : IAsyncDisposable
 
     // ---- execution ---------------------------------------------------------
 
-    /// <summary>Queued (and re-ready) tasks in scheduler-friendly priority order.</summary>
+    /// <summary>Queued (and re-ready) tasks in scheduler-friendly priority order — honoring per-task start-at times.</summary>
     public IReadOnlyList<DownloadTask> GetQueued()
         => _tasks.Values.Where(e => e.Task.State == DownloadState.Queued)
             .Select(e => e.Task)
+            .Where(t => t.StartAtMs <= 0 || t.StartAtMs <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
             .OrderByDescending(t => t.Priority).ThenBy(t => t.Id)
             .ToList();
 
@@ -319,7 +331,8 @@ public sealed class DownloadEngine : IAsyncDisposable
     /// <summary>Starts ONE queued task. Called by the Scheduler when a slot is free.</summary>
     public bool TryStartNext(Func<DownloadTask, bool>? predicate = null)
     {
-        foreach (var e in _tasks.Values.Where(x => x.Task.State == DownloadState.Queued)
+        foreach (var e in _tasks.Values.Where(x => x.Task.State == DownloadState.Queued
+                     && (x.Task.StartAtMs <= 0 || x.Task.StartAtMs <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
                      .OrderByDescending(x => x.Task.Priority).ThenBy(x => x.Task.Id))
         {
             if (predicate is not null && !predicate(e.Task)) continue;
@@ -353,7 +366,8 @@ public sealed class DownloadEngine : IAsyncDisposable
                 _repo.Update(t);
             },
             t => _repo.Update(t),
-            t => _repo.UpdateProgress(t.Id, t.State, t.ReceivedBytes, t.SegmentsDone, t.SegmentsTotal));
+            t => _repo.UpdateProgress(t.Id, t.State, t.ReceivedBytes, t.SegmentsDone, t.SegmentsTotal),
+            _vault, _antivirus, _tempRoot);
 
         e.Runner = runner;
         var runTask = Task.Run(() => runner.RunAsync(e.Task, e.CancelCts.Token, _shutdown.Token));
@@ -384,13 +398,42 @@ public sealed class DownloadEngine : IAsyncDisposable
             e.NextRetryAtMs = Environment.TickCount64 + (long)Backoff.Compute(e.BackoffAttempt, e.RetryAfterHeader).TotalMilliseconds;
             _repo.Update(e.Task);
             _events.TaskUpdated(e.Task);
+            return;
         }
-        else
+
+        // permanent failure (or retries exhausted) → mirror rotation (IDM parity)
+        if (!retryable || e.Task.RetryCount >= e.Task.MaxRetries)
         {
-            e.Task.State = DownloadState.Failed;
-            _repo.Update(e.Task);
-            _events.TaskUpdated(e.Task);
+            var next = NextMirror(e.Task);
+            if (next is not null)
+            {
+                EngineLog.Info($"mirror failover: {e.Task.Url} → {next}");
+                e.Task.EffectiveUrl = null;
+                e.Task.Url = next;
+                e.Task.RetryCount = 0;
+                e.BackoffAttempt = 0;
+                e.Task.ErrorCode = null;
+                e.Task.ErrorMessage = null;
+                e.Task.State = DownloadState.Queued;
+                _repo.Update(e.Task);
+                _events.TaskUpdated(e.Task);
+                return;
+            }
         }
+
+        e.Task.State = DownloadState.Failed;
+        _repo.Update(e.Task);
+        _events.TaskUpdated(e.Task);
+    }
+
+    /// <summary>First mirror not currently in use, or null when exhausted.</summary>
+    private static string? NextMirror(DownloadTask t)
+    {
+        var current = t.EffectiveUrl ?? t.Url;
+        foreach (var m in t.Mirrors)
+            if (!string.Equals(m, current, StringComparison.OrdinalIgnoreCase))
+                return m;
+        return null;
     }
 
     private void ProcessRetryBackoffs()
@@ -454,6 +497,12 @@ public sealed record NewDownload
     public DownloadKind? Kind { get; init; }
     public string? MediaSelection { get; init; }
     public bool AutoStart { get; init; } = true;
+    /// <summary>Fallback URLs tried in order on permanent failure (IDM mirrors).</summary>
+    public IReadOnlyList<string>? Mirrors { get; init; }
+    /// <summary>Epoch-ms: the scheduler starts this task only after this time (0 = now).</summary>
+    public long StartAtMs { get; init; }
+    /// <summary>Per-task post-completion action ("" | exit | shutdown | hibernate | sleep | logoff).</summary>
+    public string? PostAction { get; init; }
 }
 
 public sealed record AddDownloadOutcome(string TaskKey, long TaskId, bool Duplicate);

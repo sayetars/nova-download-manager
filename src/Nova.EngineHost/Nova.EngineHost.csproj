@@ -15,6 +15,7 @@
     <ProjectReference Include="..\Nova.Engine\Nova.Engine.csproj" />
     <ProjectReference Include="..\Nova.Scheduler\Nova.Scheduler.csproj" />
     <ProjectReference Include="..\Nova.Media\Nova.Media.csproj" />
+    <ProjectReference Include="..\Nova.Grabber\Nova.Grabber.csproj" />
     <ProjectReference Include="..\Nova.Ipc\Nova.Ipc.csproj" />
   </ItemGroup>
 

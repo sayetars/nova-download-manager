@@ -204,6 +204,19 @@ async function handle(msg: BgRequest, sender?: RuntimeSender): Promise<BgRespons
       });
       return r;
     }
+    case 'add-downloads': {
+      // IDM parity: bulk add from the page-links dialog.
+      if (!s.enabled) return { ok: false, error: { code: 'disabled', message: 'Nova is disabled' } };
+      let added = 0;
+      for (const url of msg.urls.slice(0, 500)) {
+        const r = await postToHost({
+          type: 'add_download',
+          payload: { url, referer: msg.referer, auto_start: true },
+        });
+        if (r.ok) added++;
+      }
+      return { ok: true, data: { added } };
+    }
     default:
       return { ok: false, error: { code: 'unknown', message: 'Unknown message' } };
   }
@@ -214,6 +227,7 @@ async function handle(msg: BgRequest, sender?: RuntimeSender): Promise<BgRespons
 const MENU_LINK = 'nova-link';
 const MENU_VIDEO = 'nova-video';
 const MENU_PAGE = 'nova-page';
+const MENU_ALL_LINKS = 'nova-all-links';
 
 browser.runtime.onInstalled.addListener(() => {
   browser.contextMenus.removeAll(() => {
@@ -223,6 +237,12 @@ browser.runtime.onInstalled.addListener(() => {
       id: MENU_PAGE,
       title: 'Download page videos with Nova',
       contexts: ['page', 'video'],
+    });
+    // IDM parity: "Download ALL links with Nova" opens the selection dialog.
+    browser.contextMenus.create({
+      id: MENU_ALL_LINKS,
+      title: 'Download ALL links with Nova…',
+      contexts: ['page'],
     });
   });
 });
@@ -236,6 +256,9 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
       type: 'add_download',
       payload: { url: info.linkUrl, referer, auto_start: true },
     });
+  } else if (info.menuItemId === MENU_ALL_LINKS && tab?.id != null) {
+    await browser.tabs.sendMessage(tab.id, { type: 'nova-open-links-dialog' }).catch(() => {});
+    return;
   } else if (info.menuItemId === MENU_PAGE && tab?.id != null) {
     const items = tabMedia.get(tab.id) ?? [];
     for (const m of items.slice(0, 8)) {

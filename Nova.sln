@@ -19,6 +19,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nova.Ipc", "src\Nova.Ipc\No
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nova.EngineHost", "src\Nova.EngineHost\Nova.EngineHost.csproj", "{DF4B42E6-C553-4BF4-9DBF-803DEF75BD71}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nova.Grabber", "src\Nova.Grabber\Nova.Grabber.csproj", "{A1000001-0000-0000-0000-00000000000C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nova.Cli", "src\Nova.Cli\Nova.Cli.csproj", "{A1000001-0000-0000-0000-00000000000D}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nova.BrowserHost", "src\Nova.BrowserHost\Nova.BrowserHost.csproj", "{765516E5-8783-415B-B816-2ECBEE7A99B4}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nova.Windows", "src\Nova.Windows\Nova.Windows.csproj", "{C08BBE5A-E232-4111-A5A8-81E03D31C041}"
@@ -76,6 +80,14 @@ Global
 		{69AB714C-737E-4D8A-9F3B-4710E2B9113F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{69AB714C-737E-4D8A-9F3B-4710E2B9113F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{69AB714C-737E-4D8A-9F3B-4710E2B9113F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000001-0000-0000-0000-00000000000C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000001-0000-0000-0000-00000000000C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000001-0000-0000-0000-00000000000C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000001-0000-0000-0000-00000000000C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1000001-0000-0000-0000-00000000000D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1000001-0000-0000-0000-00000000000D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1000001-0000-0000-0000-00000000000D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1000001-0000-0000-0000-00000000000D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{AEA99B4F-0193-4779-9643-D98DC8C197DF} = {EA8A7F4B-D247-4C90-9E0F-DB5E1DAFA447}

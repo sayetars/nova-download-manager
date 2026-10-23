@@ -25,10 +25,12 @@ public sealed class DownloadDataFile : IAsyncDisposable
         FinalPath = finalPath;
     }
 
-    public static DownloadDataFile OpenOrCreate(string finalPath, long preallocateLength)
+    public static DownloadDataFile OpenOrCreate(string finalPath, long preallocateLength, string? tempRoot = null)
     {
-        var temp = finalPath + TempSuffix;
-        var dir = Path.GetDirectoryName(finalPath);
+        var temp = string.IsNullOrWhiteSpace(tempRoot)
+            ? finalPath + TempSuffix
+            : Path.Combine(Path.GetFullPath(tempRoot), Path.GetFileName(finalPath) + TempSuffix);
+        var dir = Path.GetDirectoryName(temp);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
         var exists = File.Exists(temp);

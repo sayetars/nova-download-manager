@@ -95,7 +95,9 @@ export type BgRequest =
       fileName?: string;
       mediaSelection?: unknown;
       referer?: string;
-    };
+    }
+  | { type: 'add-downloads'; urls: string[]; referer?: string }
+  | { type: 'collect-links'; filter?: 'documents' | 'media' | 'archives' | 'all' };
 
 export type BgResponse =
   | { ok: true; data: unknown }

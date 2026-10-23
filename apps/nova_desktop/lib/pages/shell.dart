@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +11,7 @@ import '../core/theme.dart';
 import '../providers/engine.dart' as prov;
 import 'browser_page.dart';
 import 'downloads_page.dart';
+import 'grabber_page.dart';
 import 'history_page.dart';
 import 'overview_page.dart';
 import 'queues_page.dart';
@@ -24,6 +28,7 @@ enum NavSection {
   media,
   queues,
   scheduler,
+  grabber,
   browser,
   history,
   diagnostics,
@@ -41,16 +46,81 @@ class _ShellPageState extends ConsumerState<ShellPage> {
   NavSection _section = NavSection.overview;
   bool _expanded = true;
   String _search = '';
+  Timer? _clipboardTimer;
+  String? _lastClip;
 
   @override
   void initState() {
     super.initState();
     // refresh task list once engine connects (provider handles it) + keyboard shortcuts
     HardwareKeyboard.instance.addHandler(_onKey);
+    // IDM parity: clipboard URL monitor — prefills the Add dialog (never silent).
+    _clipboardTimer = Timer.periodic(const Duration(seconds: 2), (_) => _checkClipboard());
+    // IDM parity: completion → dialog + sound.
+    ref.listenManual(prov.tasksProvider, (prev, next) {
+      final oldIds = prev?.value?.where((t) => t.state == 'completed').map((t) => t.taskKey).toSet() ?? const <String>{};
+      next.whenData((list) {
+        for (final t in list) {
+          if (t.state == 'completed' && !oldIds.contains(t.taskKey)) _onTaskCompleted(t);
+        }
+      });
+    });
+  }
+
+  void _checkClipboard() async {
+    final engine = ref.read(prov.engineProvider);
+    if (engine == null || !mounted) return;
+    try {
+      final data = await Clipboard.getData('text/plain');
+      final text = data?.text?.trim();
+      if (text == null || text.isEmpty || text == _lastClip || text.length > 2048) return;
+      final isUrl = RegExp(r'^(https?|ftps?)://\S+$', caseSensitive: false).hasMatch(text);
+      if (!isUrl) return;
+      _lastClip = text;
+      if (!mounted) return;
+      // prefill the Add dialog so the user confirms (never auto-add silently)
+      showAddDownloadDialog(context, prefillUrl: text);
+    } catch (_) {/* clipboard unavailable */}
+  }
+
+  void _onTaskCompleted(TaskUi t) {
+    if (!mounted) return;
+    _playDoneSound();
+    final s = S.of(context);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.completeDialogTitle),
+        content: Text(t.fileName),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.close)),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref.read(prov.tasksProvider.notifier).openFile(t.taskKey);
+            },
+            child: Text(s.openFile),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _playDoneSound() {
+    try {
+      if (Platform.isWindows) {
+        Process.run('powershell', ['-c', '[console]::beep(880,180)']);
+      } else if (Platform.isLinux) {
+        Process.run('paplay', ['/usr/share/sounds/freedesktop/stereo/complete.oga']);
+      } else if (Platform.isMacOS) {
+        Process.run('afplay', ['/System/Library/Sounds/Glass.aiff']);
+      }
+    } catch (_) {/* sounds are best effort */}
   }
 
   @override
   void dispose() {
+    _clipboardTimer?.cancel();
     HardwareKeyboard.instance.removeHandler(_onKey);
     super.dispose();
   }
@@ -112,6 +182,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       const _NavItem(null, null, null, '', null), // spacer
       _NavItem(NavSection.queues, Icons.account_tree_outlined, Icons.account_tree, s.queues, null),
       _NavItem(NavSection.scheduler, Icons.alarm_outlined, Icons.alarm, s.scheduler, null),
+      _NavItem(NavSection.grabber, Icons.travel_explore_outlined, Icons.travel_explore, s.grabber, null),
       _NavItem(NavSection.browser, Icons.extension_outlined, Icons.extension, s.browserIntegration, null),
       _NavItem(NavSection.history, Icons.history_outlined, Icons.history, s.history, null),
       _NavItem(NavSection.diagnostics, Icons.monitor_heart_outlined, Icons.monitor_heart, s.diagnostics, null),
@@ -251,6 +322,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
         NavSection.media => s.mediaDownloads,
         NavSection.queues => s.queues,
         NavSection.scheduler => s.scheduler,
+        NavSection.grabber => s.grabber,
         NavSection.browser => s.browserIntegration,
         NavSection.history => s.history,
         NavSection.diagnostics => s.diagnostics,
@@ -337,6 +409,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       NavSection.overview => OverviewPage(search: _search),
       NavSection.queues => const QueuesPage(),
       NavSection.scheduler => const SchedulerPage(),
+      NavSection.grabber => const GrabberPage(),
       NavSection.browser => const BrowserIntegrationPage(),
       NavSection.history => HistoryPage(search: _search),
       NavSection.diagnostics => const DiagnosticsPage(),

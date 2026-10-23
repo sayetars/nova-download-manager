@@ -44,6 +44,7 @@ public sealed class NovaDatabase : IAsyncDisposable
         if (SchemaVersion < 2) { RunMigration(2, Sql.Migration2); SchemaVersion = 2; }
         if (SchemaVersion < 3) { RunMigration(3, Sql.Migration3); SchemaVersion = 3; }
         if (SchemaVersion < 4) { RunMigration(4, Sql.Migration4); SchemaVersion = 4; }
+        if (SchemaVersion < 5) { RunMigration(5, Sql.Migration5); SchemaVersion = 5; }
     }
 
     private void RunMigration(int version, string sql)
@@ -184,5 +185,44 @@ internal static class Sql
 
     public const string Migration4 = """
         ALTER TABLE download_task ADD COLUMN speed_cap_bytes INTEGER NOT NULL DEFAULT 0;
+        """;
+
+    public const string Migration5 = """
+        ALTER TABLE download_task ADD COLUMN mirror_urls TEXT NOT NULL DEFAULT '';
+        ALTER TABLE download_task ADD COLUMN start_at_ms INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE download_task ADD COLUMN post_action TEXT NOT NULL DEFAULT '';
+        CREATE TABLE IF NOT EXISTS login_vault (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            host TEXT NOT NULL,
+            realm TEXT NOT NULL DEFAULT '',
+            user_name TEXT NOT NULL,
+            secret TEXT NOT NULL,
+            scheme TEXT NOT NULL DEFAULT 'basic',
+            created_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_vault_host ON login_vault(host, realm, user_name);
+        CREATE TABLE IF NOT EXISTS grabber_project (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            root_url TEXT NOT NULL,
+            max_depth INTEGER NOT NULL DEFAULT 3,
+            include_filter TEXT NOT NULL DEFAULT '',
+            exclude_filter TEXT NOT NULL DEFAULT '',
+            options TEXT NOT NULL DEFAULT '{}',
+            save_dir TEXT NOT NULL DEFAULT '',
+            last_run_at TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_grabber_root ON grabber_project(root_url);
+        CREATE TABLE IF NOT EXISTS category_def (
+            name TEXT PRIMARY KEY,
+            patterns TEXT NOT NULL DEFAULT '',
+            destination_dir TEXT NOT NULL DEFAULT '',
+            icon TEXT NOT NULL DEFAULT 'folder'
+        );
+        CREATE TABLE IF NOT EXISTS byte_quota_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            at_ms INTEGER NOT NULL,
+            bytes INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_quota_time ON byte_quota_log(at_ms);
         """;
 }

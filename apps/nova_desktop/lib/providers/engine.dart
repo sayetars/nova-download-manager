@@ -160,6 +160,9 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
     String? destinationDir,
     int? maxConnections,
     bool autoStart = true,
+    List<String> mirrors = const [],
+    int? startAtMs,
+    String? postAction,
   }) async {
     final engine = ref.read(engineProvider);
     if (engine == null) return null;
@@ -168,16 +171,100 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
       if (fileName != null && fileName.isNotEmpty) 'file_name': fileName,
       if (destinationDir != null && destinationDir.isNotEmpty) 'destination_dir': destinationDir,
       if (maxConnections != null) 'max_connections': maxConnections,
+      if (mirrors.isNotEmpty) 'mirrors': mirrors,
+      if (startAtMs != null) 'start_at_ms': startAtMs,
+      if (postAction != null && postAction.isNotEmpty) 'post_action': postAction,
       'auto_start': autoStart,
     });
     await _load();
     return resp['task_key'] as String?;
   }
 
+  /// Batch add (IDM parity): list of URLs, or one [01-99] pattern.
+  Future<List<String>> addBatch(List<String> urls, {String? fileName, int? maxConnections, bool autoStart = true}) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return [];
+    final tasks = urls
+        .map((u) => {
+              'url': u,
+              if (fileName != null && fileName.isNotEmpty) 'file_name': fileName,
+              if (maxConnections != null) 'max_connections': maxConnections,
+              'auto_start': autoStart,
+            })
+        .toList();
+    final resp = await engine.call('add_downloads', {'items': tasks});
+    await _load();
+    final list = (resp['tasks'] as List? ?? []);
+    return list.map((e) => (e as Map)['task_key'] as String? ?? '').toList();
+  }
+
+  Future<List<String>> expandPattern(String pattern) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return [];
+    final resp = await engine.call('expand_pattern', {'root_url': pattern});
+    return ((resp['urls'] as List?) ?? []).map((e) => e.toString()).toList();
+  }
+
+  Future<void> updateTask(String key,
+      {int? maxConnections, int? speedCapBytes, String? queueName, int? priority, String? postAction}) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return;
+    await engine.call('update_task', {
+      'task_key': key,
+      if (maxConnections != null) 'max_connections': maxConnections,
+      if (speedCapBytes != null) 'speed_cap_bytes': speedCapBytes,
+      if (queueName != null && queueName.isNotEmpty) 'queue_name': queueName,
+      if (priority != null) 'priority': priority,
+      if (postAction != null) 'post_action': postAction,
+    });
+    await _load();
+  }
+
+  Future<List<Map<String, dynamic>>> zipList(String taskKey) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return [];
+    final resp = await engine.call('zip_list', {'task_key': taskKey});
+    return ((resp['entries'] as List?) ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<String?> zipExtract(String taskKey, List<String> entries) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return null;
+    final resp = await engine.call('zip_extract', {'task_key': taskKey, 'entries': entries});
+    await _load();
+    return resp['dir'] as String?;
+  }
+
+  Future<String?> startGrabber(Map<String, dynamic> opts) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return null;
+    final resp = await engine.call('grabber_start', opts);
+    return resp['run_id'] as String?;
+  }
+
   Future<void> pause(String key) => _cmd('pause_task', key);
   Future<void> resume(String key) => _cmd('resume_task', key);
   Future<void> cancel(String key) => _cmd('cancel_task', key);
   Future<void> retry(String key) => _cmd('retry_task', key);
+
+  Future<void> openFile(String key) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return;
+    final resp = await engine.call('open_file', {'task_key': key});
+    final path = resp['path'] as String?;
+    if (path == null || !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS) return;
+    try {
+      if (Platform.isWindows) {
+        await Process.start('explorer.exe', [path], mode: ProcessStartMode.detached);
+      } else if (Platform.isLinux) {
+        await Process.start('xdg-open', [path], mode: ProcessStartMode.detached);
+      } else {
+        await Process.start('open', [path], mode: ProcessStartMode.detached);
+      }
+    } catch (_) {/* desktop handler may be missing */}
+  }
 
   Future<void> remove(String key, {bool deleteFiles = false}) async {
     final engine = ref.read(engineProvider);
