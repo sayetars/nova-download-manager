@@ -27,3 +27,9 @@ tools/dropbox/.access-token.json
 *.db
 *.db-shm
 *.db-wal
+
+# bootstrap debris
+*_rc.txt
+dotnet-install.sh
+*.deb
+
