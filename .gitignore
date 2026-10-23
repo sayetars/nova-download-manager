@@ -1,2 +1,21 @@
 skills/
 node_modules/
+upload/
+download/
+worklog.md
+
+# Build artifacts
+**/bin/
+**/obj/
+**/.dart_tool/
+**/.flutter-plugins*
+**/build/
+*.user
+.vs/
+.vscode/
+.idea/
+*.log
+*.novadl
+*.db
+*.db-shm
+*.db-wal

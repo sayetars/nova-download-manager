@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Description>Nova download engine: HTTP(S), multipart, resume, integrity verification.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nova.Domain\Nova.Domain.csproj" />
+    <ProjectReference Include="..\Nova.Persistence\Nova.Persistence.csproj" />
+  </ItemGroup>
+
+</Project>

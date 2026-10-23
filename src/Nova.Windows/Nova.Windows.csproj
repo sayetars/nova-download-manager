@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Description>Nova Windows-specific capabilities: battery status, autostart registration, power actions. Builds only on Windows.</Description>
+    <UseWindowsForms>false</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nova.Scheduler\Nova.Scheduler.csproj" />
+  </ItemGroup>
+
+</Project>

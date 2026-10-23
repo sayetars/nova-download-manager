@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Description>Nova Native Messaging Host: browser stdin/stdout ↔ engine named pipe bridge.</Description>
+    <AssemblyName>NovaBrowserHost</AssemblyName>
+    <RootNamespace>Nova.BrowserHost</RootNamespace>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nova.Domain\Nova.Domain.csproj" />
+    <ProjectReference Include="..\Nova.Ipc\Nova.Ipc.csproj" />
+  </ItemGroup>
+
+</Project>

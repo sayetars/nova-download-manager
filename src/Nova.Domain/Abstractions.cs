@@ -1,0 +1,73 @@
+using System.Text.Json.Serialization;
+
+namespace Nova.Domain;
+
+/// <summary>Clock abstraction so tests can fast-forward time (scheduler, backoff).</summary>
+public interface IClock
+{
+    DateTimeOffset UtcNow { get; }
+    long UnixMs { get; }
+}
+
+public sealed class SystemClock : IClock
+{
+    public static readonly SystemClock Instance = new();
+    public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+    public long UnixMs => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+}
+
+/// <summary>Result of probing a URL (HEAD / ranged GET) before download starts.</summary>
+public sealed class HttpProbeResult
+{
+    public required string FinalUrl { get; init; }
+    public long ContentLength { get; init; } = -1;
+    public bool AcceptRanges { get; init; }
+    public string? Etag { get; init; }
+    public string? LastModified { get; init; }
+    public string? ContentType { get; init; }
+    public string? SuggestedFileName { get; init; }
+    public int StatusCode { get; init; }
+    public Dictionary<string, string> ExtraHeaders { get; init; } = new();
+
+    [JsonIgnore] public bool HasKnownSize => ContentLength >= 0;
+}
+
+public interface IDownloadTaskRepository
+{
+    long Insert(DownloadTask task);
+    void Update(DownloadTask task);
+    void UpdateProgress(long taskId, DownloadState state, long received, int segmentsDone, int segmentsTotal);
+    void UpdateState(long taskId, DownloadState state, string? errorCode, string? errorMessage, ErrorCategory? cat);
+    void UpdateValidation(long taskId, ValidationStatus status, string? actualHash);
+    DownloadTask? Get(long taskId);
+    DownloadTask? GetByKey(string taskKey);
+    IReadOnlyList<DownloadTask> GetAll();
+    IReadOnlyList<DownloadTask> GetActive();
+    IReadOnlyList<DownloadTask> GetInterrupted();
+    void Delete(long taskId);
+    void PurgeHistory(DateTimeOffset olderThan, bool onlyCompleted);
+    string? GetActualHash(long taskId);
+}
+
+public interface ISegmentRepository
+{
+    void ReplaceSegments(long taskId, IReadOnlyList<DownloadSegment> segments);
+    IReadOnlyList<DownloadSegment> GetForTask(long taskId);
+    void UpdateProgress(long segmentId, long received);
+    void DeleteForTask(long taskId);
+}
+
+public interface IQueueRepository
+{
+    IReadOnlyList<DownloadQueueInfo> GetAll();
+    DownloadQueueInfo GetOrCreate(string name);
+    void Save(DownloadQueueInfo queue);
+    void Delete(string name);
+}
+
+public interface ISettingsRepository
+{
+    string? Get(string key);
+    void Set(string key, string value);
+    IReadOnlyDictionary<string, string> GetAll();
+}

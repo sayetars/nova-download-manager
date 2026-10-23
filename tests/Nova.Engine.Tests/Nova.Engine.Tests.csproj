@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Description>Nova engine integration tests against a local HTTP test server.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Nova.Domain\Nova.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Nova.Persistence\Nova.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\Nova.Engine\Nova.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Nova.Scheduler\Nova.Scheduler.csproj" />
+    <ProjectReference Include="..\..\src\Nova.Media\Nova.Media.csproj" />
+    <ProjectReference Include="..\..\src\Nova.Ipc\Nova.Ipc.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Description>Nova Engine host: user-level background process owning the engine, scheduler and IPC server.</Description>
+    <AssemblyName>NovaEngine</AssemblyName>
+    <RootNamespace>Nova.EngineHost</RootNamespace>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nova.Domain\Nova.Domain.csproj" />
+    <ProjectReference Include="..\Nova.Persistence\Nova.Persistence.csproj" />
+    <ProjectReference Include="..\Nova.Engine\Nova.Engine.csproj" />
+    <ProjectReference Include="..\Nova.Scheduler\Nova.Scheduler.csproj" />
+    <ProjectReference Include="..\Nova.Media\Nova.Media.csproj" />
+    <ProjectReference Include="..\Nova.Ipc\Nova.Ipc.csproj" />
+  </ItemGroup>
+
+</Project>

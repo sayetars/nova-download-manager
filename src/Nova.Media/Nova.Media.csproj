@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Description>Nova media: HLS/DASH manifest analysis, quality candidates, media download pipeline.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nova.Domain\Nova.Domain.csproj" />
+    <ProjectReference Include="..\Nova.Engine\Nova.Engine.csproj" />
+  </ItemGroup>
+
+</Project>
