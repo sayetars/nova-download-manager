@@ -66,6 +66,15 @@ tradeoff: user must have .NET 8 runtime OR we also ship self-contained variant.
 consequence: produce BOTH variants — bundle tar (FDD) + a self-contained engine tar for runtime-less machines; test FDD path in smoke.
 
 ---
+D-009 · 2026-10-23 (T-011)
+decision: Fix flaky BrowserPathTests by making the IPC pipe name injectable (optional `pipeName` on IpcServer ctor + IpcClient.ConnectAsync, default = current well-known name) instead of respinning v1.0.1.
+alternatives: disable xUnit parallelism (hides the class of bug); fixed longer sleep (still racy); respin v1.0.1 tarball (no user-facing change → invalid reason to invalidate a verified artifact).
+reason: root cause of the intermittent 3-test failure was two parallel test classes racing for the single well-known pipe name `nova-engine-v1` (IpcTests' in-proc server vs BrowserPathFixture's spawned engine); secondarily a fixed 1500ms engine-boot sleep that cold-JIT boots can exceed. Evidence: first full run after reset failed exactly the 3 ok:true-expecting browser tests while the ok:false-expecting malformed test passed (symptom of auth_failed against the wrong server), all 4 passed in isolation, and 4 consecutive full runs green after isolation fix.
+evidence: tests/Nova.Engine.Tests/{IpcAndSchedulerTests,BrowserPathTests}.cs; 4× dotnet test 43/43; download/evidence-v1.0.1-reverify.txt.
+tradeoff: a tiny public-surface addition (optional param) exists ahead of the next release.
+consequence: v1.0.1 tarball stays valid (zero runtime behavior change with defaults); the fix ships in v1.0.2; CI-style parallel test runs are now deterministic on Linux (NOVA_PIPE_PATH isolation) and safe-by-unique-name everywhere.
+
+---
 D-008 · 2026-10-24 (T-010)
 decision: Ship dual engine variants with a smart launcher (RUN-LINUX.sh) that swaps the self-contained NovaEngine into the bundle when no .NET 8 runtime is detected.
 alternatives: self-contained only (150 MB+ tar, slower start); FDD only (blocks runtime-less testers).

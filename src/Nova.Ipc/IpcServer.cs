@@ -19,6 +19,7 @@ public sealed class IpcServer : IAsyncDisposable
 {
     private readonly IIpcMessageHandler _handler;
     private readonly string _expectedToken;
+    private readonly string _pipeName;
     private readonly List<IpcConnection> _connections = new();
     private readonly object _connLock = new();
     private CancellationTokenSource _cts = new();
@@ -28,10 +29,12 @@ public sealed class IpcServer : IAsyncDisposable
     public event Action<IpcConnection>? ClientConnected;
     public event Action<IpcConnection>? ClientDisconnected;
 
-    public IpcServer(IIpcMessageHandler handler, string expectedToken)
+    public IpcServer(IIpcMessageHandler handler, string expectedToken, string? pipeName = null)
     {
         _handler = handler;
         _expectedToken = expectedToken;
+        // Injectable for tests/isolated instances; default = engine's well-known name.
+        _pipeName = pipeName ?? Protocol.ResolvedPipeName;
     }
 
     public int ConnectedCount
@@ -62,14 +65,14 @@ public sealed class IpcServer : IAsyncDisposable
                         WindowsIdentityGetter.Current, PipeAccessRights.ReadWrite,
                         System.Security.AccessControl.AccessControlType.Allow));
                     pipe = NamedPipeServerStreamAcl.Create(
-                        Protocol.ResolvedPipeName, PipeDirection.InOut,
+                        _pipeName, PipeDirection.InOut,
                         Protocol.MaxConnections, PipeTransmissionMode.Byte,
                         PipeOptions.Asynchronous, 0, 0, acl);
                 }
                 else
                 {
                     pipe = new NamedPipeServerStream(
-                        Protocol.ResolvedPipeName, PipeDirection.InOut,
+                        _pipeName, PipeDirection.InOut,
                         Protocol.MaxConnections, PipeTransmissionMode.Byte,
                         PipeOptions.Asynchronous);
                 }

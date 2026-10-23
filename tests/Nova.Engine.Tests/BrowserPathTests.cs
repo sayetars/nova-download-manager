@@ -131,6 +131,12 @@ public sealed class BrowserPathFixture : IAsyncLifetime
         var downloads = Path.Combine(DataDir, "downloads");
         Directory.CreateDirectory(downloads);
 
+        // Isolated socket path (Unix): the spawned engine must NOT share the
+        // well-known "nova-engine-v1" socket with anything else running on the
+        // machine (parallel test classes, a real engine, etc.). Both processes
+        // resolve NOVA_PIPE_PATH identically.
+        var socketPath = Path.Combine(DataDir, "engine.sock");
+
         // 1) real engine host with our temp data dir
         var enginePsi = new ProcessStartInfo(EngineHostBin)
         {
@@ -141,9 +147,25 @@ public sealed class BrowserPathFixture : IAsyncLifetime
         enginePsi.ArgumentList.Add("--data");
         enginePsi.ArgumentList.Add(DataDir);
         enginePsi.Environment["DOTNET_ROOT"] = DotnetRoot;
+        if (!OperatingSystem.IsWindows())
+            enginePsi.Environment["NOVA_PIPE_PATH"] = socketPath;
         _engine = Process.Start(enginePsi);
         Assert.NotNull(_engine);
-        await Task.Delay(1500); // engine boots: DB, token, pipe, scheduler
+
+        // Wait for engine readiness (token file + socket) instead of a fixed delay:
+        // cold-JIT boots can exceed any hard-coded sleep → flaky failures.
+        var tokenPath = Path.Combine(DataDir, "ipc.token");
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (_engine.HasExited)
+                Assert.Fail($"engine exited during boot (code {_engine.ExitCode}). stderr: " +
+                    (ReadAllStderr(_engine) ?? "<none>"));
+            var socketUp = OperatingSystem.IsWindows() || File.Exists(socketPath);
+            if (File.Exists(tokenPath) && socketUp) break;
+            await Task.Delay(100);
+        }
+        Assert.True(File.Exists(tokenPath), "engine did not write ipc.token within 30s");
 
         // 2) allow the integration-test extension origin via host config (next to the exe)
         const string extId = "integrationtest0000000000000";
@@ -164,10 +186,18 @@ public sealed class BrowserPathFixture : IAsyncLifetime
         hostPsi.Environment["HOME"] = DataDir;
         hostPsi.Environment["NOVA_DATA_DIR"] = DataDir;
         hostPsi.Environment["DOTNET_ROOT"] = DotnetRoot;
+        if (!OperatingSystem.IsWindows())
+            hostPsi.Environment["NOVA_PIPE_PATH"] = socketPath;
         _host = Process.Start(hostPsi);
         Assert.NotNull(_host);
         await Task.Delay(400);
         Assert.False(_host.HasExited, "browser host exited immediately");
+    }
+
+    private static string? ReadAllStderr(Process p)
+    {
+        try { return p.StandardError.ReadToEnd(); }
+        catch { return null; }
     }
 
     private static void WriteFrame(Stream s, byte[] payload)

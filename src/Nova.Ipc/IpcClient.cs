@@ -20,9 +20,9 @@ public sealed class IpcClient : IAsyncDisposable
     public event Action<Envelope>? EventReceived;
     public event Action? Disconnected;
 
-    public async Task<bool> ConnectAsync(string token, string clientName, int timeoutMs = 4000)
+    public async Task<bool> ConnectAsync(string token, string clientName, int timeoutMs = 4000, string? pipeName = null)
     {
-        _pipe = new NamedPipeClientStream(".", Protocol.ResolvedPipeName, PipeDirection.InOut,
+        _pipe = new NamedPipeClientStream(".", pipeName ?? Protocol.ResolvedPipeName, PipeDirection.InOut,
             PipeOptions.Asynchronous);
         await _pipe.ConnectAsync(timeoutMs);
         await Framing.WriteFrameAsync(_pipe,

@@ -3,24 +3,25 @@
 ## START-HERE BLOCK (keep at top, update every checkpoint)
 ```text
 CURRENT VERSION: v1.0.1
-CURRENT TASK: none open — v1.0.1 (first Linux x64 build) RELEASED and uploaded to Dropbox; awaiting user test feedback
+CURRENT TASK: T-011 (post-reset re-verification) COMPLETE — v1.0.1 re-verified end-to-end in fresh environment; flaky-test bug found & fixed (uncommitted-to-release, test-infra only); awaiting user test feedback
 CURRENT SUBSTEP: —
-DONE: v1.0.1 Linux build: engine 43/43 tests, Flutter 8/8 tests + 0 analyze errors, release bundle smoke-tested end-to-end (IPC + real download + GUI under Xvfb + VLM visual QA), self-contained no-runtime boot verified, package uploaded + round-trip hash-verified on Dropbox
-NEXT: user tests nova-dm-1.0.1-linux-x64.tar.gz on their Linux machine; iterate on feedback (bugs → v1.0.2). Optional backlog: .deb/AppImage packaging, real store extension IDs, Windows 1.0.1 parity rebuild
+DONE: v1.0.1 re-verified after env reset: 43/43 ×4 runs, analyze 0 errors, flutter 8/8, smoke suite PASS (build tree), shipped-tarball clean-env E2E PASS (raw-probe download, byte-exact), VLM visual QA PASS, Dropbox floor/worklog verified OK. Root-caused & fixed flaky BrowserPathTests (pipe-name race + fixed boot delay) via injectable pipeName; new tools: ipc_probe.py + tarball_cleanenv_test.sh
+NEXT: user tests nova-dm-1.0.1-linux-x64.tar.gz on their machine; feedback → v1.0.2 (would include the test-infra fix). Optional: .deb/AppImage, store extension IDs, Windows parity rebuild
 BLOCKERS: none
-LAST VERIFIED: 2026-10-23 19:20 UTC — dotnet test 43/43 PASS; flutter test 8/8 PASS; smoke_test.sh PASS; ui_smoke.sh PASS; demo_download_shot.sh PASS; self-contained clean-env boot PASS; Dropbox round-trip SHA-256 match (e0199b868f8de2dba405de55ee95fe16dd20aedfaa363e8b6f61546ccb3c603e)
+LAST VERIFIED: 2026-10-23 19:56 UTC — dotnet test 43/43 (×4); flutter test 8/8 + 0 analyze errors; smoke_test.sh PASS; ui_smoke.sh PASS; demo_download_shot.sh PASS + VLM; tarball_cleanenv_test.sh PASS (sha256 match e0199b86…c603e); Dropbox round-trip floor check OK
 RULES VERSION: UNIVERSAL-RULES.md v1 (sha256 87de0baac75ab719a23d2b83e86db430…, 3594 lines)
 ENVIRONMENT STATE: toolchain live at sdk/{dotnet,flutter} + ~/tools/{gtk3-dev,llvm-19,glvnd,xvfb-dev}; source env.sh via scripts/env.sh; no root; no background process survival between tool calls
 ```
 
 ## DONE (high level)
 - v1.0.0 Windows-path release (previous session).
-- v1.0.1 Linux x64 release (this session): `download/nova-dm-1.0.1-linux-x64.tar.gz` (70.6 MB) + Dropbox `/Nova-Download-Manager/builds/`.
+- v1.0.1 Linux x64 release: `download/nova-dm-1.0.1-linux-x64.tar.gz` (70.6 MB) + Dropbox `/Nova-Download-Manager/builds/`.
 - Persistence layer + project memory (per UNIVERSAL-RULES mandate).
+- T-011: post-reset re-verification of v1.0.1 (all green, evidence in download/evidence-v1.0.1-reverify.txt) + flaky-test root-cause fix (pipe-name race) — test-infra only, no user-facing behavior change; ships with next version.
 
 ## NEXT
 1. User tests the Linux build (RUN-LINUX.sh) on their machine.
-2. Feedback → triage → v1.0.2 fixes.
+2. Feedback → triage → v1.0.2 fixes (v1.0.2 will include the IPC test-isolation fix).
 3. Optional: .deb/AppImage packaging, publishing extension IDs into manifests, Windows parity rebuild of 1.0.1.
 
 ## LAST VERIFIED STATE

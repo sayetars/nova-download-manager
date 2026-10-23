@@ -2,6 +2,16 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [Unreleased]
+
+### Fixed — test infrastructure (no user-facing behavior change; v1.0.1 artifacts remain valid)
+- Deterministic parallel test isolation: `IpcServer`/`IpcClient` accept an optional explicit pipe name (default unchanged). Root cause of intermittent `BrowserPathTests` failures was two concurrently-running test classes binding the same well-known pipe `nova-engine-v1`; browser-path fixtures now run their engine on an isolated `NOVA_PIPE_PATH` socket, and IPC tests use unique per-class names.
+- Browser-path test fixture now polls engine readiness (token + socket file, 30 s) instead of a fixed 1500 ms sleep, and reports engine stderr on boot failure.
+
+### Added — verification tooling
+- `scripts/linux/ipc_probe.py`: dependency-free (stdlib) nipc/1 client — handshake → add_download → poll → byte-exact verification. Proves the shipped package works without any dev tooling installed.
+- `scripts/linux/tarball_cleanenv_test.sh`: extracts the published tarball, applies the RUN-LINUX.sh self-contained swap, boots the engine under `env -i`, and drives the raw probe end-to-end (PASS on v1.0.1).
+
 ## [1.0.1] — 2026-10-23
 
 ### Added — Linux support

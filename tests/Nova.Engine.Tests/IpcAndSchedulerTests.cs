@@ -21,10 +21,13 @@ public class IpcTests : IAsyncLifetime
 
     private IpcServer _server = null!;
     private readonly string _token = "test-token-" + Guid.NewGuid().ToString("N");
+    // Unique per test-class instance: parallel classes must never fight over the
+    // engine's well-known default pipe name (root cause of flaky browser-path runs).
+    private readonly string _pipeName = "nova-ipc-test-" + Guid.NewGuid().ToString("N");
 
     public Task InitializeAsync()
     {
-        _server = new IpcServer(new EchoHandler(), _token);
+        _server = new IpcServer(new EchoHandler(), _token, _pipeName);
         _server.Start();
         return Task.CompletedTask;
     }
@@ -35,7 +38,7 @@ public class IpcTests : IAsyncLifetime
     public async Task Handshake_Request_Response_Roundtrip()
     {
         await using var client = new IpcClient();
-        await client.ConnectAsync(_token, "test-client");
+        await client.ConnectAsync(_token, "test-client", pipeName: _pipeName);
         var resp = await client.RequestAsync("hello_world", new { x = 1 });
         Assert.Equal("ok", resp.Type);
         var payload = resp.Payload!.Value.GetProperty("echo").GetString();
@@ -46,13 +49,13 @@ public class IpcTests : IAsyncLifetime
     public async Task Bad_Token_Is_Rejected()
     {
         await using var client = new IpcClient();
-        await Assert.ThrowsAnyAsync<Exception>(() => client.ConnectAsync("wrong-token", "intruder"));
+        await Assert.ThrowsAnyAsync<Exception>(() => client.ConnectAsync("wrong-token", "intruder", pipeName: _pipeName));
     }
 
     [Fact]
     public async Task Oversized_Frame_Is_Rejected_Without_Crashing_Server()
     {
-        await using var badPipe = new System.IO.Pipes.NamedPipeClientStream(".", Protocol.PipeName,
+        await using var badPipe = new System.IO.Pipes.NamedPipeClientStream(".", _pipeName,
             System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
         await badPipe.ConnectAsync(3000);
         // announce a 100MB frame → server must drop the connection, not crash
@@ -62,7 +65,7 @@ public class IpcTests : IAsyncLifetime
         await badPipe.FlushAsync();
 
         await using var client = new IpcClient();
-        await client.ConnectAsync(_token, "legit"); // server must still accept new clients
+        await client.ConnectAsync(_token, "legit", pipeName: _pipeName); // server must still accept new clients
         var resp = await client.RequestAsync("ping");
         Assert.Equal("ok", resp.Type);
     }
@@ -76,7 +79,7 @@ public class IpcTests : IAsyncLifetime
             for (var i = 0; i < 4; i++)
             {
                 var c = new IpcClient();
-                await c.ConnectAsync(_token, $"client-{i}");
+                await c.ConnectAsync(_token, $"client-{i}", pipeName: _pipeName);
                 clients.Add(c);
             }
             var tasks = clients.Select(async (c, i) =>
