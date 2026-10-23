@@ -4,7 +4,7 @@
 set -u
 BUNDLE="/home/z/my-project/apps/nova_desktop/build/linux/x64/release/bundle"
 APP="/home/z/my-project/apps/nova_desktop"
-export PATH="$HOME/flutter/bin:$HOME/.dotnet:$PATH"
+source "$(dirname "$0")/../env.sh"
 
 rm -rf "$HOME/.local/share/nova" /tmp/CoreFxPipe_nova-engine-v1
 cd "$BUNDLE" || exit 1

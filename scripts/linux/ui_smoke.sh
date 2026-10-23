@@ -2,9 +2,11 @@
 # UI smoke test: run the real Flutter Linux bundle under Xvfb, let it
 # auto-spawn the engine, screenshot the window, then tear everything down.
 set -u
-export LD_LIBRARY_PATH="$HOME/tools/glvnd/usr/lib/x86_64-linux-gnu:$HOME/tools/xvfb-dev/usr/lib/x86_64-linux-gnu:$HOME/tools/clang-dev/usr/lib/x86_64-linux-gnu"
+source "$(dirname "$0")/../env.sh"
+export LD_LIBRARY_PATH="$HOME/tools/glvnd/usr/lib/x86_64-linux-gnu:$HOME/tools/xvfb-dev/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 export __EGL_VENDOR_LIBRARY_FILENAMES="$HOME/tools/glvnd/usr/share/glvnd/egl_vendor.d/50_mesa.json"
-XVFB="$HOME/tools/xvfb-dev/usr/bin/Xvfb"
+export LIBGL_DRIVERS_PATH="$HOME/tools/glvnd/usr/lib/x86_64-linux-gnu/dri"
+XVFB="/usr/bin/Xvfb"
 XWD="$HOME/tools/xvfb-dev/usr/bin/xwd"
 BUNDLE="/home/z/my-project/apps/nova_desktop/build/linux/x64/release/bundle"
 

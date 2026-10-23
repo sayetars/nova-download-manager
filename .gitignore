@@ -4,6 +4,14 @@ upload/
 download/
 worklog.md
 
+# Local toolchain (D-003) — re-fetchable, see RECOVERY.md
+sdk/
+
+# Dropbox secrets (D-004) — never commit, never archive
+tools/dropbox/.dropbox-credentials.json
+tools/dropbox/.access-token.json
+*.access-token.json
+
 # Build artifacts
 **/bin/
 **/obj/

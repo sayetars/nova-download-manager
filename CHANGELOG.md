@@ -2,6 +2,23 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [1.0.1] — 2026-10-23
+
+### Added — Linux support
+- First Linux x64 release build: `flutter build linux --release` + `dotnet publish -r linux-x64` (framework-dependent **and** self-contained engine variants in one package).
+- `RUN-LINUX.sh` smart launcher: detects .NET 8 runtime; when absent, automatically swaps in the self-contained engine (verified boot with zero dotnet present: socket, IPC token and SQLite database created).
+- `register-browser-host.sh`: registers the native-messaging host for Chrome/Chromium/Brave/Vivaldi/Edge (`~/.config/<browser>/NativeMessagingHosts/`) and Firefox (`~/.mozilla/native-messaging-hosts/`).
+- Bilingual (EN/FA) Linux quickstart guide; docs set shipped inside the package.
+
+### Added — Persistence infrastructure (per user mandate)
+- UNIVERSAL-RULES.md adopted as permanent agent constitution; project memory files (STATE, RESUME-POINT, VERSIONS, DECISIONS, RECOVERY, RULES-READ-LEDGER, PROJECT-RULES) established.
+- Dropbox persistence layer (`tools/dropbox/`): source checkpoints with SHA-256 manifests, state-doc mirroring, safe version-gated restore; build artifacts published to `/Nova-Download-Manager/builds/`.
+- Toolchain rebuild procedure for this sandbox documented in RECOVERY.md (user-space, no root: .NET 8 SDK, Flutter 3.47.7, clang 19, GTK3 dev, cmake/ninja, GL/EGL software stack).
+
+### Verified on Linux (Debian 13, x86-64)
+- 43/43 C# engine tests, 8/8 Flutter tests, 0 analyze errors (parity with 1.0.0).
+- End-to-end smoke on the release bundle: real IPC handshake → download → byte check; GUI under Xvfb auto-spawns engine, shows "Engine connected" and "Completed: 1" after a live download (visual QA via VLM confirmed).
+
 ## [1.0.0] — 2026-10-23
 
 ### Added — Engine

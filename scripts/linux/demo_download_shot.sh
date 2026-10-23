@@ -2,10 +2,11 @@
 # Visual demo: UI up (auto-spawns engine) → smoke test pushes a real download
 # through the SAME engine → screenshot shows the completed task in the UI.
 set -u
-export LD_LIBRARY_PATH="$HOME/tools/glvnd/usr/lib/x86_64-linux-gnu:$HOME/tools/xvfb-dev/usr/lib/x86_64-linux-gnu:$HOME/tools/clang-dev/usr/lib/x86_64-linux-gnu"
+source "$(dirname "$0")/../env.sh"
+export LD_LIBRARY_PATH="$HOME/tools/glvnd/usr/lib/x86_64-linux-gnu:$HOME/tools/xvfb-dev/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 export __EGL_VENDOR_LIBRARY_FILENAMES="$HOME/tools/glvnd/usr/share/glvnd/egl_vendor.d/50_mesa.json"
-export PATH="$HOME/flutter/bin:$HOME/.dotnet:$PATH"
-XVFB="$HOME/tools/xvfb-dev/usr/bin/Xvfb"
+export LIBGL_DRIVERS_PATH="$HOME/tools/glvnd/usr/lib/x86_64-linux-gnu/dri"
+XVFB="/usr/bin/Xvfb"
 BUNDLE="/home/z/my-project/apps/nova_desktop/build/linux/x64/release/bundle"
 
 pkill -x Xvfb 2>/dev/null; pkill -x NovaEngine 2>/dev/null
