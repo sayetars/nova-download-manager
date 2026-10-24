@@ -2,6 +2,39 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [1.5.0] — 2026-10-25
+
+**The G-track** — the five flagship gaps identified in the v1.4.1 post-ship review: partial video preview while downloading (G17), optional yt-dlp bridge (G28), per-server performance profiles (G27), TLS client certificates (G25) and Metalink PGP verification (G26). C# suite grew 169 → 195 tests (+26 in `V150Tests`); Flutter 8 → 13 tests + 0 analyze errors; smoke PASS + parity 12/12 + tarball clean-env PASS; tarball round-trip verified on Dropbox.
+
+### Added — engine
+- **Partial preview server (G17)**: `Preview/PreviewServer.cs` — a loopback-only, token-authenticated HTTP server that streams the in-progress `.novadl` file to any media player. GET/HEAD + full Range support (seek by re-request); unranged GETs are clamped to the CONTIGUOUS downloaded prefix so the player only ever sees real bytes (the advertised length grows as data arrives); ranged reads may cross sparse regions (zeros — players tolerate, same as torrent streaming); MIME guessing per media type; segment map comes live from the engine (running plans) or the repository (paused/interrupted). IPC: `preview_start` / `preview_stop`.
+- **yt-dlp bridge (G28)**: `YtDlp/YtDlpBridge.cs` — optional, user-supplied binary (Settings → yt-dlp path; auto-probes `yt-dlp`/`yt-dlp_linux`/`youtube-dl` on PATH; never bundled or downloaded). `ytdlp_status` / `ytdlp_analyze` (`-J --no-playlist`, parsed into a format table) / `ytdlp_download` (resolves the chosen format to a direct URL via `-g`, then downloads through the NORMAL engine pipeline — multi-segment, resume, mirrors, partial preview via forced sequential allocation; HLS/DASH URLs route to the engine media pipeline). Invariant #3 kept: DRM-tagged formats are never surfaced; live streams are refused. In-app player embedding (media_kit) was attempted and reverted — no system libmpv in the dev sandbox and no root (documented in KNOWN-LIMITATIONS; preview hands off to the system player instead).
+- **Per-server performance profiles (G27)**: `ServerProfiles/ServerProfileService.cs` — EWMA throughput (α=0.25), EWMA TTFB and ok/fail counters per host, fed by the probe, every slice request and every drain in `TaskRunner`; snapshots persist to SQLite (`server_profile` table, migration v10) and survive restarts. Metalink mirrors within the same priority bucket are re-ordered fastest-first by the blended score (throughput × success² ÷ (1+latency)). IPC: `server_profiles` (with active-now counts) / `reset_server_profiles`; Settings shows the table (speed, latency, success rate, served bytes, score) per server.
+- **TLS client certificates (G25)**: `Security/ClientCertificateService.cs` + `client_cert` table — bind a certificate to an exact host or `*.wildcard` (most-specific match wins). Sources: PFX/P12 (with passphrase), PEM cert+key, or a user-store thumbprint. Wired through `SocketsHttpHandler.SslOptions.LocalCertificateSelectionCallback` on BOTH engine HttpClients (no handler rebuild on edits — the callback reads a 10 s cache). IPC: `list_client_certs` / `save_client_cert` (validated before saving) / `delete_client_cert`; passphrase is never echoed over IPC. Verified with an in-test mTLS server that requires the client cert.
+- **Metalink PGP (G26)**: `Security/PgpVerifier.cs` (BouncyCastle) — detached-signature verification (armored or base64), multi-key keyring attempts, one broken key never breaks the ring. Metalink `<signature type="pgp">` (RFC 5854) is captured at analyze; `.sig`/`.asc` sidecars are fetched best-effort. Policy `engine.metalink_pgp` = off | **warn** | require — require fails the task with `pgp_failed`/`pgp_required`/`pgp_no_key`, warn records `pgp_status` on the task (verified/failed/nokey/error) and shows a badge in the UI. Keyring: `pgp_keyring` table + IPC `list_pgp_keys`/`save_pgp_key`/`delete_pgp_key` (fingerprint extracted on import).
+
+### Added — persistence / IPC
+- SQLite migration v10: `server_profile`, `client_cert` (unique host pattern), `pgp_keyring` (unique fingerprint), `download_task.pgp_signature` + `pgp_status` columns; task repository mapping end-to-end.
+- `TaskSnapshot` + `pgp_status`/`has_pgp_signature` (task rows and events).
+
+### Added — UI (Flutter, EN + FA)
+- **Preview dialog (G17)**: task context menu gains "Preview" for video/audio/HLS/DASH tasks while downloading, paused, interrupted or completed — live availability bar, copy-URL button and one-click handoff to the system player; the engine's private `127.0.0.1` stream URL is shown for manual players.
+- **yt-dlp quality panel (G28)**: the Add dialog gains "Analyze with yt-dlp" for page URLs — the format table (resolution, extension, size, protocol, needs-merge marking) with radio selection; preselects the best directly-downloadable format; localized failure reasons (no binary / live / DRM / generic).
+- **Settings → Security**: client-certificate manager (source dropdown PFX/PEM/store, host pattern, paths, passphrase, list + delete) and the PGP keyring (paste armored key, labeled list, delete) plus the Metalink PGP policy dropdown (off/warn/require).
+- **Settings → Server performance**: the live per-server table (avg speed, latency, success %, served bytes, score, active-now bolt) with a reset action; Settings → yt-dlp: path field + availability chip (version + path from the engine).
+- ~55 new strings, EN + FA (RTL-safe).
+
+### Verified end-to-end (loopback-only)
+- Preview: unranged GET clamps to contiguous prefix (byte-exact body), ranged 206 + 416 handling, suffix ranges, token auth (404 on bad token/unknown task), HEAD length, MIME map, contiguity math (gaps stop the prefix).
+- yt-dlp: format parsing (DRM + storyboard excluded; direct flags for progressive/audio-only/m3u8), analyze + resolve against a fake `yt-dlp` binary, structured errors for missing binary / failed analysis.
+- Profiles: EWMA + score math, persistence round-trip, stable fastest-first mirror ordering (unknown hosts last), live recording during a real engine download (2 MiB served recorded).
+- Client certs: mTLS handshake with the bound PEM cert (thumbprint matched server-side) vs. handshake failure without a binding; host-pattern matching (exact / wildcard / non-match); repo upsert-on-host + passphrase retrieval.
+- PGP: RSA-2048 keygen + sign + verify round-trip; tampered data → Invalid; missing keyring → NoKey; garbage → Malformed; metalink XML signature extraction → verified; E2E warn policy (valid sig → task completes `verified`; wrong sig → completes `failed`) and require policy (wrong sig → task FAILS with `pgp_failed`).
+- Full suites: dotnet 195/195, flutter 13 passed + 1 skipped, 0 analyze errors; smoke / parity 12/12 / clean-env PASS; release tarball sha256 round-trip verified on Dropbox.
+
+### Notes
+- Two pre-existing timing-sensitive tests (`DownloadEngineTests` suite) flake intermittently under full-suite parallel load on the 2-CPU dev sandbox — they pass in isolation and in the majority of full runs; reproduced at v1.4.1 baseline before any v1.5.0 change. Heavy v1.5.0 suites are serialized with the torrent collection to reduce contention.
+
 ## [1.4.1] — 2026-10-25
 
 **BitTorrent polish** — the v1.4.x roadmap items: PEX peer exchange, DHT peer-store serving, per-file selection in multi-file torrents, UDP tracker scrape, and super-seeding. C# suite grew 160 → 169 tests (+9 in `TorrentV141Tests`); Flutter 8/8 + 0 analyze errors; smoke PASS + parity 12/12 + tarball clean-env PASS; tarball round-trip verified on Dropbox.

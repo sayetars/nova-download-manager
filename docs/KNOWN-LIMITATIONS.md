@@ -30,6 +30,11 @@ This repository was **built and tested on Linux** (.NET 8.0.426 + Flutter 3.47.7
 10. **Video-detection coverage** is verified for MP4/HLS/DASH test fixtures; the general claim is limited to "sites whose players expose standard media elements or network-visible segments" — no 100% detection promise.
 11. **Extension store publishing** is not done (requires developer accounts + signed packages). Dev-mode loading is fully supported and documented.
 12. **Numbers in the installer are unsigned** — no digital signature is applied or claimed.
+13. **Partial preview plays through the system media player** (v1.5.0). The engine streams the partial file over a private loopback URL and the UI hands it to the OS-default player (`start`/`xdg-open`/`open`) plus a copy-able URL. An embedded in-app player (media_kit) was implemented and then reverted: the dev sandbox has no system libmpv and no root to install it; bundling decisions belong to a proper review. On the Linux dev box `xdg-open` may map to no player at all.
+14. **yt-dlp is never bundled or auto-downloaded** (v1.5.0). The user installs the binary and points Settings → yt-dlp at it. Merging separate video+audio formats is NOT offered by the bridge yet — such formats are listed but marked "needs merge" and cannot be selected (a yt-dlp-native download mode is future work). Sites requiring login need the user's own cookies pasted into the task headers.
+15. **MP4 files with the `moov` atom at the END cannot be previewed meaningfully** — that is inherent to the container (the player needs the index before the media data; "faststart" files and TS/MKV stream fine). The preview still serves the bytes; the player simply may refuse or stall.
+16. **Metalink PGP "require" policy fails the task but keeps the temp file** — resume/retry with a corrected keyring works without redownloading completed pieces.
+17. **Server performance profiles are advisory** — they reorder equal-priority metalink mirrors and inform the Settings table; they never override an explicit higher-priority mirror (RFC 5854 priority is authoritative).
 
 ## Testing gaps to close on a Windows machine
 
