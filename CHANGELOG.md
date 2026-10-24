@@ -2,6 +2,37 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [1.1.0] — 2026-10-24
+
+**IDM Parity Core + Plus** — the P0 gap list from `docs/IDM-PARITY.md` is now implemented, with most P1 items included. C# suite grew 43 → 81 tests; parity E2E smoke 12/12 PASS on the shipped bits.
+
+### Added — engine
+- **Byte-quota windows** (IDM parity): rolling caps ("500MB per 60 min") with automatic pause of all running tasks and automatic resume when the window frees; restart-safe via `byte_quota_log` checkpoints; `quota_state` IPC + `engine_status.quota` payload; settings `quota.enabled` / `quota.max_bytes` / `quota.window_minutes` (accepts MB/GB/K/M/G suffixes). 10 new unit tests.
+- **Live segment view**: per-segment progress published in-flight (500 ms throttle) and served over `task_segments` IPC; powers the new details-sheet segment bars.
+- **FTP progress fix**: FluentFTP cumulative offsets converted to true byte deltas — the speed meter and quota tracker now see real FTP bytes (previously rate-only).
+- Vault-auth retry, mirror failover, antivirus hook, dynamic segmentation, 32-connection cap, start-at times and per-task post actions — verified by the new ParityTests suite (vault, mirrors, schedule fields, FTP URLs).
+
+### Added — UI (Flutter)
+- **Task properties editor** (edit task → queue, category, priority, connections 1–32, speed cap, start-at HH:mm, post-completion action, mirrors) from the context menu and details sheet; engine enforces not-running.
+- **Site logins vault editor** (settings): list / add / edit / delete stored credentials (host, user, password, Basic/Digest/NTLM/Negotiate); passwords never travel back to the UI.
+- **Categories editor** (settings): custom categories with patterns and per-category destination directory.
+- **Speed-limiter quick toggle** in the toolbar (unlimited / 128 KB/s … 10 MB/s presets) wired to `engine.global_speed_cap`.
+- **Details sheet upgrade**: stacked per-segment progress bars (each slice sized by byte span) + live speed graph.
+- **Drag & drop**: dropped links/text prefill the Add dialog (single URL) or the batch add dialog (multiple); implemented natively — Win32 `WM_DROPFILES` in the Windows runner, GTK drag-dest in the Linux runner, forwarded over method channel `nova/dnd`.
+- **Byte-quota section** in settings + warning banner while the cap has paused downloads.
+- **Check for updates** action (uses `update.url` + `check_update` IPC).
+
+### Added — tooling / release
+- `scripts/linux/package_release.sh`: assembles the versioned Linux tarball (bundle + self-contained engine + CLI + extensions + docs + SHA256SUMS).
+- RUN-LINUX.sh hardened: sets `DOTNET_BUNDLE_EXTRACT_BASE_DIR` for single-file extraction; cleanup list covers `Nova.Grabber.dll`.
+- Parity E2E smoke (`parity_smoke_test.sh`) 12/12 PASS: engine status via CLI, byte-exact 8 MiB download, `[01-99]` pattern expansion, remote ZIP preview via Range, Site Grabber (page + 3 resources, offline-rewritten), IDM `/a` switch, global speed cap, task export.
+- Shipped-tarball clean-environment test PASS (self-contained engine boots with no .NET, raw-probe download byte-exact).
+- UI smoke under Xvfb PASS; VLM visual QA PASS (window, connection, completed task, no glitches).
+
+### Verified
+- dotnet test **81/81** (was 69 pre-session, 43 at v1.0.1) · flutter test 8/8 · flutter analyze 0 errors.
+- Built and packaged: `nova-dm-1.1.0-linux-x64.tar.gz` (41 MB, gzip; self-contained engine 70 MB single-file).
+
 ## [Unreleased]
 
 ### Fixed — test infrastructure (no user-facing behavior change; v1.0.1 artifacts remain valid)

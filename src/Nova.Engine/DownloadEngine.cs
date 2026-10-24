@@ -27,11 +27,15 @@ public sealed class DownloadEngine : IAsyncDisposable
     private readonly string? _tempRoot;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly System.Timers.Timer _retryTimer;
+    private readonly List<string> _quotaPausedKeys = new();
+    private readonly ConcurrentDictionary<string, SegmentView[]> _livePlans = new();
     private RateLimiter? _globalLimiter;
 
     public EngineEventBus Events => _events;
     public IClock Clock { get; set; } = SystemClock.Instance;
     public string DefaultDir => _defaultDir;
+    /// <summary>Byte-quota window enforcement (IDM parity); null when not configured.</summary>
+    public QuotaTracker? Quota { get; }
 
     private sealed class Entry
     {
@@ -49,7 +53,8 @@ public sealed class DownloadEngine : IAsyncDisposable
         IQueueRepository queues, ISettingsRepository settings, EngineEventBus events,
         HttpClient http, string defaultDir, int defaultConnections = 4,
         IMediaPipeline? media = null, LoginVault? vault = null,
-        Antivirus? antivirus = null, string? tempRoot = null)
+        Antivirus? antivirus = null, string? tempRoot = null,
+        QuotaTracker? quota = null)
     {
         _repo = repo;
         _segs = segs;
@@ -63,6 +68,7 @@ public sealed class DownloadEngine : IAsyncDisposable
         _vault = vault;
         _antivirus = antivirus;
         _tempRoot = string.IsNullOrWhiteSpace(tempRoot) ? null : tempRoot;
+        Quota = quota;
         _prober = new HttpProber(http);
         UpdateGlobalRateCap(ParseLong(settings.Get("engine.global_speed_cap")));
         _events.Subscribe(new EngineSelfSink(this));
@@ -367,9 +373,12 @@ public sealed class DownloadEngine : IAsyncDisposable
             },
             t => _repo.Update(t),
             t => _repo.UpdateProgress(t.Id, t.State, t.ReceivedBytes, t.SegmentsDone, t.SegmentsTotal),
-            _vault, _antivirus, _tempRoot);
+            _vault, _antivirus, _tempRoot,
+            n => Quota?.OnBytes(n),
+            (t, plan) => _livePlans[t.TaskKey] = plan.Select(s => new SegmentView(s.Index, s.Start, s.End, s.Received)).ToArray());
 
         e.Runner = runner;
+        _livePlans.TryRemove(e.Task.TaskKey, out _);
         var runTask = Task.Run(() => runner.RunAsync(e.Task, e.CancelCts.Token, _shutdown.Token));
         e.RunTask = runTask;
         _ = runTask.ContinueWith(prev =>
@@ -448,6 +457,32 @@ public sealed class DownloadEngine : IAsyncDisposable
                 _events.TaskUpdated(e.Task);
             }
         }
+        TickQuota();
+    }
+
+    /// <summary>
+    /// IDM parity — byte-quota windows: when the rolling cap is hit, pause every running
+    /// task (remembering which ones WE paused); when the window frees up, resume them.
+    /// Runs once a second on the housekeeping timer.
+    /// </summary>
+    private void TickQuota()
+    {
+        if (Quota is null || !Quota.Tick()) return;
+        if (Quota.Paused)
+        {
+            _quotaPausedKeys.Clear();
+            _quotaPausedKeys.AddRange(_tasks.Values.Where(e => e.Runner is not null).Select(e => e.Task.TaskKey));
+            PauseAll(_quotaPausedKeys);
+            EngineLog.Info($"quota: cap reached — paused {_quotaPausedKeys.Count} task(s)");
+        }
+        else
+        {
+            var keys = _quotaPausedKeys.Where(k => _tasks.ContainsKey(k)).ToList();
+            _quotaPausedKeys.Clear();
+            foreach (var k in keys) Resume(k);
+            if (keys.Count > 0)
+                EngineLog.Info($"quota: window freed — resumed {keys.Count} task(s)");
+        }
     }
     // ---- queries -----------------------------------------------------------
 
@@ -456,6 +491,10 @@ public sealed class DownloadEngine : IAsyncDisposable
 
     public DownloadTask? Get(string taskKey) =>
         _tasks.TryGetValue(taskKey, out var e) ? e.Task : _repo.GetByKey(taskKey);
+
+    /// <summary>Live per-segment progress for the UI (empty when not running).</summary>
+    public SegmentView[] GetSegmentViews(string taskKey) =>
+        _livePlans.TryGetValue(taskKey, out var v) ? v : Array.Empty<SegmentView>();
 
     public void PurgeHistory(int olderThanDays, bool onlyCompleted)
         => _repo.PurgeHistory(DateTimeOffset.UtcNow.AddDays(-olderThanDays), onlyCompleted);
@@ -472,6 +511,7 @@ public sealed class DownloadEngine : IAsyncDisposable
     {
         _retryTimer.Stop();
         _retryTimer.Dispose();
+        Quota?.Flush();
         // Hard-stop only: runners mark tasks Interrupted (recoverable) — NOT user-cancelled.
         _shutdown.Cancel();
         foreach (var e in _tasks.Values)
@@ -481,6 +521,9 @@ public sealed class DownloadEngine : IAsyncDisposable
         }
     }
 }
+
+/// <summary>Live per-segment progress view for the UI (task_segments IPC).</summary>
+public sealed record SegmentView(int Index, long Start, long End, long Received);
 
 public sealed record NewDownload
 {

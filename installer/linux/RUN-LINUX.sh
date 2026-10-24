@@ -20,6 +20,10 @@ have_dotnet8() {
   false
 }
 
+# single-file engine extracts to ~/.cache/nova (writable fallback: TMPDIR).
+export DOTNET_BUNDLE_EXTRACT_BASE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/nova"
+mkdir -p "$DOTNET_BUNDLE_EXTRACT_BASE_DIR" 2>/dev/null || export DOTNET_BUNDLE_EXTRACT_BASE_DIR="${TMPDIR:-/tmp}"
+
 # FDD apphost is small (<1 MB); the self-contained binary is ~67 MB.
 if [ -f "$NE" ] && [ "$(stat -c%s "$NE")" -lt 1000000 ]; then
   if have_dotnet8; then

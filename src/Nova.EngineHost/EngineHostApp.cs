@@ -30,6 +30,7 @@ public sealed class EngineHostApp : IAsyncDisposable
     private readonly DateTime _startedAt = DateTime.UtcNow;
     private readonly LoginVault _vault;
     private readonly GrabberService _grabber;
+    private readonly QuotaTracker _quota;
     private readonly System.Timers.Timer _postActionTimer;
     private string _pendingPostAction = "";
     private bool _postActionCancelled;
@@ -58,11 +59,13 @@ public sealed class EngineHostApp : IAsyncDisposable
             enabled: _settings.Get("av.enabled") == "true",
             command: _settings.Get("av.command"));
         var tempRoot = _settings.Get("engine.temp_dir");
+        _quota = new QuotaTracker(_settings, db: _db);
         _engine = new DownloadEngine(
             new DownloadTaskRepository(_db), new SegmentRepository(_db),
             new QueueRepository(_db), _settings, new EngineEventBus(),
             _http, downloads, defaultConnections: 4,
-            media: new MediaPipeline(), vault: _vault, antivirus: antivirus, tempRoot: tempRoot);
+            media: new MediaPipeline(), vault: _vault, antivirus: antivirus, tempRoot: tempRoot,
+            quota: _quota);
         _engineHttpClient = _http;
 
         _scheduler = new SchedulerService(_engine, _settings, new QueueRepository(_db));

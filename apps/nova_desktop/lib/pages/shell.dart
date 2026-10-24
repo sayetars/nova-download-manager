@@ -48,6 +48,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
   String _search = '';
   Timer? _clipboardTimer;
   String? _lastClip;
+  static const _dndChannel = MethodChannel('nova/dnd');
 
   @override
   void initState() {
@@ -56,6 +57,17 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     HardwareKeyboard.instance.addHandler(_onKey);
     // IDM parity: clipboard URL monitor — prefills the Add dialog (never silent).
     _clipboardTimer = Timer.periodic(const Duration(seconds: 2), (_) => _checkClipboard());
+    // IDM parity: drag & drop links/files onto the window (native runner bridge).
+    _dndChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onDrop') {
+        final items = (call.arguments['items'] as List?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            const <String>[];
+        _handleDrop(items);
+      }
+      return null;
+    });
     // IDM parity: completion → dialog + sound.
     ref.listenManual(prov.tasksProvider, (prev, next) {
       final oldIds = prev?.value?.where((t) => t.state == 'completed').map((t) => t.taskKey).toSet() ?? const <String>{};
@@ -81,6 +93,22 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       // prefill the Add dialog so the user confirms (never auto-add silently)
       showAddDownloadDialog(context, prefillUrl: text);
     } catch (_) {/* clipboard unavailable */}
+  }
+
+  /// IDM parity: dropped links/text → prefill Add dialog (single URL) or the
+  /// batch Add dialog (multiple). Dropped local files are ignored.
+  void _handleDrop(List<String> items) {
+    if (!mounted || items.isEmpty) return;
+    final urls = items
+        .map((it) => it.startsWith('file://') ? '' : it)
+        .where((it) => RegExp(r'^(https?|ftps?)://\S+', caseSensitive: false).hasMatch(it))
+        .toList();
+    if (urls.isEmpty) return;
+    if (urls.length == 1) {
+      showAddDownloadDialog(context, prefillUrl: urls.first);
+    } else {
+      showAddDownloadDialog(context, prefillUrls: urls);
+    }
   }
 
   void _onTaskCompleted(TaskUi t) {
@@ -160,11 +188,36 @@ class _ShellPageState extends ConsumerState<ShellPage> {
             child: Column(
               children: [
                 _toolbar(s, status),
+                if (status?.quota?.paused == true) _quotaBanner(s, status!.quota!),
                 Divider(height: 1, color: Theme.of(context).dividerTheme.color),
                 Expanded(child: _page(s)),
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// IDM parity — banner shown while the byte-quota cap has paused all downloads.
+  Widget _quotaBanner(S s, QuotaUi quota) {
+    final resumeMin = (quota.resumeInMs / 60000).ceil();
+    return Container(
+      width: double.infinity,
+      color: NovaColors.warning.withOpacity(0.14),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      child: Row(
+        children: [
+          const Icon(Icons.hourglass_bottom_rounded, size: 16, color: NovaColors.warning),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              resumeMin > 0 ? '${s.quotaPaused} (+$resumeMin ${s.min})' : s.quotaPaused,
+              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: NovaColors.warning),
+            ),
+          ),
+          Text('${Fmt.bytes(context, quota.usedBytes)} / ${Fmt.bytes(context, quota.capBytes)}',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: NovaColors.warning)),
         ],
       ),
     );
@@ -362,9 +415,49 @@ class _ShellPageState extends ConsumerState<ShellPage> {
             label: Text(s.addDownload),
           ),
           const SizedBox(width: 10),
+          _speedLimitButton(s),
+          const SizedBox(width: 10),
           _connectionChip(s, connected, globalSpeed),
         ],
       ),
+    );
+  }
+
+  /// IDM parity — global speed-limiter quick toggle in the toolbar.
+  Widget _speedLimitButton(S s) {
+    final settings = ref.watch(prov.settingsProvider);
+    final cap = int.tryParse(settings['engine.global_speed_cap'] ?? '') ?? 0;
+    return PopupMenuButton<String>(
+      tooltip: s.speedLimit,
+      position: PopupMenuPosition.under,
+      icon: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(cap > 0 ? Icons.speed_rounded : Icons.speed_outlined, size: 19),
+        if (cap > 0) ...[
+          const SizedBox(width: 4),
+          Text(Fmt.speed(context, cap),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+        ],
+      ]),
+      onSelected: (v) {
+        if (v == 'custom') return;
+        ref.read(prov.settingsProvider.notifier).set('engine.global_speed_cap', v);
+      },
+      itemBuilder: (context) => [
+        CheckedPopupMenuItem(value: '0', checked: cap <= 0, child: Text(s.unlimited)),
+        const PopupMenuDivider(),
+        for (final preset in [
+          ('131072', '128 KB/s'),
+          ('524288', '512 KB/s'),
+          ('1048576', '1 MB/s'),
+          ('2097152', '2 MB/s'),
+          ('5242880', '5 MB/s'),
+          ('10485760', '10 MB/s'),
+        ])
+          CheckedPopupMenuItem(
+              value: preset.$1,
+              checked: cap.toString() == preset.$1,
+              child: Text(preset.$2)),
+      ],
     );
   }
 

@@ -5,11 +5,12 @@
 #include <gdk/gdkx.h>
 #endif
 
-#include "flutter/generated_plugin_registrant.h"
+#include <flutter/generated_plugin_registrant.h>
 
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlMethodChannel* dnd_channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -17,6 +18,40 @@ G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+}
+
+// Nova drag & drop (IDM parity): dropped text/URI lists are forwarded to the
+// Dart side on method channel "nova/dnd" as a call to "onDrop".
+static void nova_dnd_data_received(GtkWidget* widget, GdkDragContext* context,
+                                    gint x, gint y, GtkSelectionData* data,
+                                    guint info, guint time, gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  if (self->dnd_channel == nullptr) {
+    gtk_drag_finish(context, FALSE, FALSE, time);
+    return;
+  }
+  gchar** uris = gtk_selection_data_get_uris(data);
+  // Not g_autoptr: ownership transfers into the map via fl_value_set_string_take.
+  FlValue* items = fl_value_new_list();
+  if (uris != nullptr) {
+    for (gint i = 0; uris[i] != nullptr && i < 64; i++) {
+      fl_value_append_take(items, fl_value_new_string(uris[i]));
+    }
+    g_strfreev(uris);
+  }
+  const guchar* text = gtk_selection_data_get_text(data);
+  if (text != nullptr && fl_value_get_length(items) == 0) {
+    fl_value_append_take(items, fl_value_new_string((const gchar*)text));
+  }
+  if (fl_value_get_length(items) > 0) {
+    g_autoptr(FlValue) args = fl_value_new_map();
+    fl_value_set_string_take(args, "items", items);
+    fl_method_channel_invoke_method(self->dnd_channel, "onDrop", args,
+                                    nullptr, nullptr, nullptr);
+  } else {
+    fl_value_unref(items);
+  }
+  gtk_drag_finish(context, TRUE, FALSE, time);
 }
 
 // Implements GApplication::activate.
@@ -74,6 +109,21 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+
+  // Nova drag & drop bridge (method channel "nova/dnd").
+  self->dnd_channel = fl_method_channel_new(fl_engine_get_binary_messenger(
+                                             fl_view_get_engine(view)),
+                                             "nova/dnd", FL_METHOD_CODEC(
+                                             fl_standard_method_codec_new()));
+  static GtkTargetEntry nova_dnd_targets[] = {
+      {(gchar*)"text/uri-list", 0, 0},
+      {(gchar*)"text/plain", 0, 1},
+      {(gchar*)"TEXT", 0, 2},
+  };
+  gtk_drag_dest_set(GTK_WIDGET(view), GTK_DEST_DEFAULT_ALL, nova_dnd_targets,
+                    G_N_ELEMENTS(nova_dnd_targets), GDK_ACTION_COPY);
+  g_signal_connect(view, "drag-data-received",
+                   G_CALLBACK(nova_dnd_data_received), self);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

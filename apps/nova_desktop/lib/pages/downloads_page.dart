@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +8,7 @@ import '../core/models.dart';
 import '../core/strings.dart';
 import '../core/theme.dart';
 import '../providers/engine.dart' as prov;
+import 'task_properties.dart';
 
 /// The download list — reused across every filter (all/active/queued/…/media).
 class DownloadsPage extends ConsumerWidget {
@@ -323,6 +326,14 @@ class TaskTile extends ConsumerWidget {
           child: Text(s.copyLink),
           onTap: () => Clipboard.setData(ClipboardData(text: task.url)),
         ),
+        if (!task.isRunning && !task.isTerminalSafe)
+          PopupMenuItem(
+            child: Text(s.editTask),
+            onTap: () {
+              Future<void>.delayed(Duration.zero)
+                  .then((_) => showTaskProperties(context, task));
+            },
+          ),
         const PopupMenuDivider(),
         PopupMenuItem(
           child: Text(s.remove, style: const TextStyle(color: NovaColors.danger)),
@@ -401,9 +412,13 @@ class _RemoveDialogState extends State<_RemoveDialog> {
 /// Add-download dialog (Ctrl+N / toolbar) — IDM parity edition:
 /// multi-line batch, [01-99] pattern preview, 32-connection chips,
 /// download-later start time and mirror URLs.
-Future<void> showAddDownloadDialog(BuildContext context, {String? prefillUrl}) async {
+Future<void> showAddDownloadDialog(BuildContext context,
+    {String? prefillUrl, List<String>? prefillUrls}) async {
   final s = S.of(context);
-  final urlCtrl = TextEditingController(text: prefillUrl ?? '');
+  final initialText = (prefillUrls != null && prefillUrls.isNotEmpty)
+      ? prefillUrls.join('\n')
+      : (prefillUrl ?? '');
+  final urlCtrl = TextEditingController(text: initialText);
   final fileCtrl = TextEditingController();
   final mirrorsCtrl = TextEditingController();
   final startAtCtrl = TextEditingController();
@@ -584,15 +599,74 @@ Future<void> showAddDownloadDialog(BuildContext context, {String? prefillUrl}) a
   });
 }
 
-/// Full task details sheet.
+/// Full task details sheet with live per-segment bars + speed graph (IDM parity).
 void showTaskDetails(BuildContext context, TaskUi task) {
-  final s = S.of(context);
   showModalBottomSheet(
     context: context,
     showDragHandle: true,
     isScrollControlled: true,
     constraints: const BoxConstraints(maxWidth: 640),
-    builder: (context) => DraggableScrollableSheet(
+    builder: (context) => _TaskDetailsSheet(taskKey: task.taskKey, task: task),
+  );
+}
+
+class _TaskDetailsSheet extends ConsumerStatefulWidget {
+  final String taskKey;
+  final TaskUi task;
+  const _TaskDetailsSheet({required this.taskKey, required this.task});
+
+  @override
+  ConsumerState<_TaskDetailsSheet> createState() => _TaskDetailsSheetState();
+}
+
+class _TaskDetailsSheetState extends ConsumerState<_TaskDetailsSheet> {
+  List<Map<String, dynamic>> _segments = [];
+  final List<int> _speedHistory = [];
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick();
+    _timer = Timer.periodic(const Duration(milliseconds: 700), (_) => _tick());
+  }
+
+  Future<void> _tick() async {
+    final engine = ref.read(prov.engineProvider);
+    if (engine == null) return;
+    try {
+      final resp = await engine.call('task_segments', {'task_key': widget.taskKey});
+      if (!mounted) return;
+      setState(() {
+        _segments = (resp['segments'] as List? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+      });
+    } catch (_) {/* engine offline */}
+    final tasks = ref.read(prov.tasksProvider).value ?? <TaskUi>[];
+    final t = tasks.where((x) => x.taskKey == widget.taskKey).firstOrNull;
+    if (t != null && mounted) {
+      setState(() {
+        _speedHistory.add(t.speedBps);
+        if (_speedHistory.length > 90) _speedHistory.removeAt(0);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.of(context);
+    final tasks = ref.watch(prov.tasksProvider).value ?? <TaskUi>[];
+    final task = tasks.where((t) => t.taskKey == widget.taskKey).firstOrNull ?? widget.task;
+    final cs = Theme.of(context).colorScheme;
+
+    return DraggableScrollableSheet(
       expand: false,
       maxChildSize: 0.85,
       initialChildSize: 0.6,
@@ -606,6 +680,17 @@ void showTaskDetails(BuildContext context, TaskUi task) {
                 child: Text(task.fileName.isEmpty ? task.url : task.fileName,
                     style: Theme.of(context).textTheme.titleLarge!.copyWith(fontWeight: FontWeight.w800)),
               ),
+              if (!task.isRunning && !task.isTerminalSafe) ...[
+                IconButton(
+                  tooltip: S.of(context).editTask,
+                  icon: const Icon(Icons.tune_rounded, size: 20),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    showTaskProperties(context, task);
+                  },
+                ),
+                const SizedBox(width: 4),
+              ],
               _StateBadge(s: s, task: task),
             ],
           ),
@@ -622,13 +707,28 @@ void showTaskDetails(BuildContext context, TaskUi task) {
               _kv(context, s.category, task.category),
             ],
           ),
+          if (_segments.length > 1) ...[
+            const SizedBox(height: 18),
+            Text(s.segments, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            _SegmentBars(segments: _segments, totalBytes: task.totalBytes),
+          ],
+          if (_speedHistory.length > 3) ...[
+            const SizedBox(height: 18),
+            Text(s.speedGraph, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 72,
+              child: CustomPaint(painter: _SpeedGraphPainter(_speedHistory), size: Size.infinite),
+            ),
+          ],
           const SizedBox(height: 18),
           if (task.url.isNotEmpty)
-            SelectableText(task.url, style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            SelectableText(task.url, style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
           const SizedBox(height: 10),
           if (task.destinationDir.isNotEmpty)
             SelectableText(task.destinationDir,
-                style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
           if (task.errorMessage != null) ...[
             const SizedBox(height: 16),
             Container(
@@ -659,8 +759,107 @@ void showTaskDetails(BuildContext context, TaskUi task) {
           ],
         ],
       ),
-    ),
-  );
+    );
+  }
+}
+
+/// Stacked per-segment progress: one horizontal strip, each slice sized by its
+/// byte span and filled by its received fraction (mirrors the IDM segment view).
+class _SegmentBars extends StatelessWidget {
+  final List<Map<String, dynamic>> segments;
+  final int totalBytes;
+  const _SegmentBars({required this.segments, required this.totalBytes});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        height: 26,
+        child: Row(
+          children: [
+            for (final seg in segments)
+              Expanded(
+                flex: _flexOf(seg),
+                child: Container(
+                  decoration: BoxDecoration(border: Border.all(color: cs.surface, width: 1)),
+                  child: Stack(
+                    alignment: AlignmentDirectional.centerStart,
+                    children: [
+                      FractionallySizedBox(
+                        widthFactor: _frac(seg).clamp(0.0, 1.0),
+                        child: Container(color: NovaColors.completed),
+                      ),
+                      Center(
+                        child: Text('${seg['index']}',
+                            style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800,
+                                color: _frac(seg) > 0.45
+                                    ? Colors.white
+                                    : cs.onSurfaceVariant)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  int _flexOf(Map<String, dynamic> seg) {
+    final end = (seg['end'] as int?) ?? -1;
+    final start = (seg['start'] as int?) ?? 0;
+    final len = end >= start ? end - start + 1 : 1;
+    return len.clamp(1, 1 << 30);
+  }
+
+  double _frac(Map<String, dynamic> seg) {
+    final end = (seg['end'] as int?) ?? -1;
+    final start = (seg['start'] as int?) ?? 0;
+    final received = (seg['received'] as int?) ?? 0;
+    if (end < start) return 0;
+    final len = end - start + 1;
+    return len <= 0 ? 0 : received / len;
+  }
+}
+
+class _SpeedGraphPainter extends CustomPainter {
+  final List<int> samples;
+  _SpeedGraphPainter(this.samples);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (samples.isEmpty) return;
+    final maxV = samples.reduce((a, b) => a > b ? a : b).clamp(1, 1 << 40);
+    final paint = Paint()
+      ..color = NovaColors.completed.withOpacity(0.85)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..isAntiAlias = true;
+    final fill = Paint()
+      ..color = NovaColors.completed.withOpacity(0.16)
+      ..style = PaintingStyle.fill;
+    final path = Path();
+    final fillPath = Path()..moveTo(0, size.height);
+    for (var i = 0; i < samples.length; i++) {
+      final x = size.width * i / (samples.length - 1);
+      final y = size.height - (size.height * samples[i] / maxV);
+      if (i == 0) path.moveTo(x, y);
+      path.lineTo(x, y);
+      fillPath.lineTo(x, y);
+    }
+    fillPath.lineTo(size.width, size.height);
+    fillPath.close();
+    canvas.drawPath(fillPath, fill);
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_SpeedGraphPainter old) => true;
 }
 
 class _StateBadge extends StatelessWidget {

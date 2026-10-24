@@ -54,7 +54,16 @@ public static class FtpTask
         await using (var fs = new FileStream(tempPath, offset > 0 ? FileMode.Append : FileMode.Create,
             FileAccess.Write, FileShare.Read, 1 << 16, useAsync: true))
         {
-            var progress = new Progress<FtpProgress>(p => onProgress(0, (long)p.TransferSpeed));
+            // FluentFTP reports cumulative TransferredBytes — convert to per-tick deltas so
+            // the engine's speed meter AND quota tracker see real byte deltas.
+            long lastOffset = offset;
+            var progress = new Progress<FtpProgress>(p =>
+            {
+                var abs = offset + p.TransferredBytes;
+                var delta = abs - lastOffset;
+                if (delta > 0) { lastOffset = abs; onProgress(delta, (long)p.TransferSpeed); }
+                else onProgress(0, (long)p.TransferSpeed);
+            });
             var ok = await client.DownloadStream(fs, remotePath, restartPosition: offset,
                 progress: progress, token: ct, stopPosition: 0);
             if (!ok) throw new IOException("FTP transfer failed.");

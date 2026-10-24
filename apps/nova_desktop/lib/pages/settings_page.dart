@@ -189,6 +189,45 @@ class SettingsPage extends ConsumerWidget {
           _postActionDropdown(context, engine, settings),
         ]),
 
+        // ---- IDM parity: site logins vault ------------------------------------
+        _LoginsSection(engine: engine),
+
+        // ---- IDM parity: categories editor ------------------------------------
+        _CategoriesSection(engine: engine),
+
+        // ---- IDM parity: byte quota -------------------------------------------
+        _QuotaSection(settings: settings, engine: engine),
+
+        // ---- check for updates --------------------------------------------------
+        _section(context, Icons.system_update_alt_rounded, s.updateNow, [
+          Row(children: [
+            OutlinedButton.icon(
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: Text(s.updateNow),
+              onPressed: () async {
+                try {
+                  final resp = await engine?.call('check_update');
+                  if (!context.mounted) return;
+                  final code = resp?['status_code'];
+                  final body = (resp?['body'] as String? ?? '').trim();
+                  final msg = body.length > 300 ? '${body.substring(0, 300)}…' : body;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(code == null ? s.updatedCheck : 'HTTP $code — $msg')));
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+                  }
+                }
+              },
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text('${s.updatedCheck} (update.url)',
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ),
+          ]),
+        ]),
+
         // ---- IDM parity: import / export --------------------------------------
         _section(context, Icons.import_export_rounded, s.importExport, [
           Row(children: [
@@ -425,5 +464,397 @@ class FilePicker {
     } catch (_) {
       return null;
     }
+  }
+}
+
+/// IDM parity — site logins vault: stored credentials used automatically on
+/// 401/407 (engine-side retry) and by FTP. Passwords never travel back to the UI.
+class _LoginsSection extends StatefulWidget {
+  const _LoginsSection({required this.engine});
+  final dynamic engine;
+
+  @override
+  State<_LoginsSection> createState() => _LoginsSectionState();
+}
+
+class _LoginsSectionState extends State<_LoginsSection> {
+  List<Map<String, dynamic>> _logins = [];
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final resp = await widget.engine?.call('list_logins');
+      if (mounted) {
+        setState(() {
+          _logins = (resp?['logins'] as List? ?? [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          _loaded = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loaded = true);
+    }
+  }
+
+  Future<void> _addOrEdit([Map<String, dynamic>? existing]) async {
+    final s = S.of(context);
+    final host = TextEditingController(text: existing?['host']?.toString() ?? '');
+    final user = TextEditingController(text: existing?['user_name']?.toString() ?? '');
+    final pass = TextEditingController();
+    String scheme = existing?['scheme']?.toString() ?? 'basic';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(s.loginsVault, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                  controller: host,
+                  decoration: InputDecoration(
+                      labelText: s.proxyHost, border: const OutlineInputBorder(), isDense: true)),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: user,
+                  decoration: InputDecoration(
+                      labelText: s.userName, border: const OutlineInputBorder(), isDense: true)),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: pass,
+                  obscureText: true,
+                  decoration: InputDecoration(
+                      labelText: s.password, border: const OutlineInputBorder(), isDense: true)),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                initialValue: scheme,
+                decoration: InputDecoration(
+                    labelText: s.authentication, border: const OutlineInputBorder(), isDense: true),
+                items: const [
+                  DropdownMenuItem(value: 'basic', child: Text('Basic')),
+                  DropdownMenuItem(value: 'digest', child: Text('Digest')),
+                  DropdownMenuItem(value: 'ntlm', child: Text('NTLM')),
+                  DropdownMenuItem(value: 'negotiate', child: Text('Kerberos / Negotiate')),
+                ],
+                onChanged: (v) => scheme = v ?? 'basic',
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(s.close)),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(s.save)),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await widget.engine?.call('save_login', {
+      'host': host.text.trim(),
+      'realm': '',
+      'user_name': user.text.trim(),
+      'password': pass.text,
+      'scheme': scheme,
+    });
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(Icons.key_rounded,
+                    size: 18, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 10),
+                Text(s.loginsVault,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                const Spacer(),
+                IconButton(
+                  tooltip: s.addCategory,
+                  icon: const Icon(Icons.add_rounded, size: 20),
+                  onPressed: () => _addOrEdit(),
+                ),
+              ]),
+              if (_loaded && _logins.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(s.none,
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                ),
+              for (final l in _logins)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Row(children: [
+                    Icon(Icons.language_rounded,
+                        size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text('${l['host']} — ${l['user_name']} (${l['scheme']})',
+                          style: const TextStyle(fontSize: 13)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, size: 16),
+                      onPressed: () => _addOrEdit(l),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                      onPressed: () async {
+                        await widget.engine?.call('delete_login', {'id': l['id']});
+                        await _load();
+                      },
+                    ),
+                  ]),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// IDM parity — categories editor: custom categories with URL/filename patterns
+/// and a per-category destination directory.
+class _CategoriesSection extends StatefulWidget {
+  const _CategoriesSection({required this.engine});
+  final dynamic engine;
+
+  @override
+  State<_CategoriesSection> createState() => _CategoriesSectionState();
+}
+
+class _CategoriesSectionState extends State<_CategoriesSection> {
+  List<Map<String, dynamic>> _cats = [];
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final resp = await widget.engine?.call('list_categories');
+      if (mounted) {
+        setState(() {
+          _cats = (resp?['categories'] as List? ?? [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          _loaded = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loaded = true);
+    }
+  }
+
+  Future<void> _addOrEdit([Map<String, dynamic>? existing]) async {
+    final s = S.of(context);
+    final name = TextEditingController(text: existing?['name']?.toString() ?? '');
+    final patterns = TextEditingController(text: existing?['patterns']?.toString() ?? '');
+    final dir = TextEditingController(text: existing?['destination_dir']?.toString() ?? '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(s.addCategory, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                  controller: name,
+                  decoration: InputDecoration(
+                      labelText: s.category, border: const OutlineInputBorder(), isDense: true)),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: patterns,
+                  decoration: InputDecoration(
+                      labelText: s.patterns, border: const OutlineInputBorder(), isDense: true)),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: dir,
+                  decoration: InputDecoration(
+                      labelText: s.destination, border: const OutlineInputBorder(), isDense: true)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(s.close)),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(s.save)),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await widget.engine?.call('save_category', {
+      'name': name.text.trim(),
+      'patterns': patterns.text.trim(),
+      'destination_dir': dir.text.trim(),
+      'icon': 'folder',
+    });
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(Icons.category_outlined,
+                    size: 18, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 10),
+                Text(s.categoriesEditor,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                const Spacer(),
+                IconButton(
+                  tooltip: s.addCategory,
+                  icon: const Icon(Icons.add_rounded, size: 20),
+                  onPressed: () => _addOrEdit(),
+                ),
+              ]),
+              if (_loaded && _cats.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(s.none,
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                ),
+              for (final c in _cats)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Row(children: [
+                    Icon(Icons.folder_rounded,
+                        size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(c['name']?.toString() ?? '',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                          if ((c['patterns']?.toString() ?? '').isNotEmpty)
+                            Text(c['patterns'].toString(),
+                                style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined, size: 16),
+                      onPressed: () => _addOrEdit(c),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                      onPressed: () async {
+                        await widget.engine?.call('delete_category', {'name': c['name']});
+                        await _load();
+                      },
+                    ),
+                  ]),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// IDM parity — byte-quota windows: rolling cap with auto-pause + auto-resume.
+class _QuotaSection extends StatelessWidget {
+  const _QuotaSection({required this.settings, required this.engine});
+  final Map<String, String> settings;
+  final dynamic engine;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.of(context);
+    final capCtrl =
+        TextEditingController(text: settings['quota.max_bytes'] ?? '500MB');
+    final windowCtrl =
+        TextEditingController(text: settings['quota.window_minutes'] ?? '60');
+    void save(String k, String v) =>
+        engine?.call('set_settings', {'values': {k: v}});
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(Icons.data_usage_rounded,
+                    size: 18, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 10),
+                Text(s.quotaSection,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+              ]),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                value: settings['quota.enabled'] == 'true',
+                onChanged: (v) => save('quota.enabled', '$v'),
+                title: Text(s.quotaEnabled, style: const TextStyle(fontSize: 13.5)),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: capCtrl,
+                    decoration: InputDecoration(
+                        labelText: s.quotaCap,
+                        border: const OutlineInputBorder(),
+                        isDense: true),
+                    onSubmitted: (v) => save('quota.max_bytes', v.trim()),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 160,
+                  child: TextField(
+                    controller: windowCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                        labelText: s.quotaWindow,
+                        border: const OutlineInputBorder(),
+                        isDense: true),
+                    onSubmitted: (v) =>
+                        save('quota.window_minutes', v.trim().isEmpty ? '60' : v.trim()),
+                  ),
+                ),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

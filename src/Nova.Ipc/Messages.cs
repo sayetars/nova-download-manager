@@ -205,7 +205,7 @@ public sealed class SaveScheduleRequest
 
 public sealed class EngineStatusResponse
 {
-    public string EngineVersion { get; set; } = "1.0.0";
+    public string EngineVersion { get; set; } = "1.1.0";
     public int ActiveTasks { get; set; }
     public int QueuedTasks { get; set; }
     public long GlobalSpeed { get; set; }
@@ -214,6 +214,18 @@ public sealed class EngineStatusResponse
     public string DataDir { get; set; } = string.Empty;
     public int ProtocolVersion { get; set; } = Protocol.Version;
     public string Platform { get; set; } = "unknown";
+    public QuotaStateDto? Quota { get; set; }
+}
+
+/// <summary>Wire shape for byte-quota windows (quota_state + engine_status.quota).</summary>
+public sealed class QuotaStateDto
+{
+    public bool Enabled { get; set; }
+    public long CapBytes { get; set; }
+    public long WindowMinutes { get; set; }
+    public long UsedBytes { get; set; }
+    public bool Paused { get; set; }
+    public long ResumeInMs { get; set; }
 }
 
 public sealed class AddDownloadResponse

@@ -130,6 +130,7 @@ class EngineStatusUi {
   final int uptimeSeconds;
   final String schedulerState;
   final String platform;
+  final QuotaUi? quota;
 
   const EngineStatusUi({
     this.activeTasks = 0,
@@ -138,6 +139,7 @@ class EngineStatusUi {
     this.uptimeSeconds = 0,
     this.schedulerState = 'idle',
     this.platform = '',
+    this.quota,
   });
 
   factory EngineStatusUi.fromJson(Map<String, dynamic> j) => EngineStatusUi(
@@ -147,6 +149,35 @@ class EngineStatusUi {
         uptimeSeconds: (j['uptime_seconds'] ?? 0) as int,
         schedulerState: (j['scheduler_state'] as String?) ?? 'idle',
         platform: (j['platform'] as String?) ?? '',
+        quota: j['quota'] == null ? null : QuotaUi.fromJson(Map<String, dynamic>.from(j['quota'] as Map)),
+      );
+}
+
+/// Byte-quota window state (IDM parity).
+class QuotaUi {
+  final bool enabled;
+  final int capBytes;
+  final int windowMinutes;
+  final int usedBytes;
+  final bool paused;
+  final int resumeInMs;
+
+  const QuotaUi({
+    this.enabled = false,
+    this.capBytes = 0,
+    this.windowMinutes = 60,
+    this.usedBytes = 0,
+    this.paused = false,
+    this.resumeInMs = 0,
+  });
+
+  factory QuotaUi.fromJson(Map<String, dynamic> j) => QuotaUi(
+        enabled: (j['enabled'] ?? false) as bool,
+        capBytes: (j['cap_bytes'] ?? 0) as int,
+        windowMinutes: (j['window_minutes'] ?? 60) as int,
+        usedBytes: (j['used_bytes'] ?? 0) as int,
+        paused: (j['paused'] ?? false) as bool,
+        resumeInMs: (j['resume_in_ms'] ?? 0) as int,
       );
 }
 

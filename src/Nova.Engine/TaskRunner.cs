@@ -30,13 +30,18 @@ public sealed class TaskRunner
     private readonly LoginVault? _vault;
     private readonly Antivirus? _antivirus;
     private readonly string? _tempRoot;
+    private readonly Action<long>? _quotaHook;
+    private readonly Action<DownloadTask, IReadOnlyList<DownloadSegment>>? _publishLive;
+    private long _lastLivePublishMs;
 
     public TaskRunner(HttpClient http, HttpProber prober, IDownloadTaskRepository tasks,
         ISegmentRepository segs, EngineEventBus events, IMediaPipeline? media,
         Func<RateLimiter?> globalLimiter, Func<RateLimiter?> taskLimiter,
         Action<DownloadTask, IReadOnlyList<DownloadSegment>> persistPlan,
         Action<DownloadTask> persistTask, Action<DownloadTask> persistProgress,
-        LoginVault? vault = null, Antivirus? antivirus = null, string? tempRoot = null)
+        LoginVault? vault = null, Antivirus? antivirus = null, string? tempRoot = null,
+        Action<long>? quotaHook = null,
+        Action<DownloadTask, IReadOnlyList<DownloadSegment>>? publishLive = null)
     {
         _http = http;
         _prober = prober;
@@ -52,6 +57,8 @@ public sealed class TaskRunner
         _vault = vault;
         _antivirus = antivirus;
         _tempRoot = tempRoot;
+        _quotaHook = quotaHook;
+        _publishLive = publishLive;
     }
 
     public SpeedMeter Speed { get; } = new();
@@ -142,6 +149,7 @@ public sealed class TaskRunner
                 if (!probe.AcceptRanges) task.MaxConnections = 1;
                 segments = BuildPlan(task);
                 _persistPlan(task, segments);
+                _publishLive?.Invoke(task, segments);
             }
             else
             {
@@ -368,6 +376,7 @@ public sealed class TaskRunner
             {
                 Interlocked.Add(ref _runReceived, n);
                 Speed.Add(n);
+                _quotaHook?.Invoke(n);
             },
             OnSegments = (done, total) =>
             {
@@ -436,7 +445,7 @@ public sealed class TaskRunner
             }
             try
             {
-                await DownloadSliceAsync(task, seg, file, limiters, ct);
+                await DownloadSliceAsync(task, pool, seg, file, limiters, ct);
             }
             finally
             {
@@ -477,11 +486,12 @@ public sealed class TaskRunner
             pool.Add(fresh);
             task.SegmentCount = pool.Count;
             try { _persistPlan(task, pool); } catch { /* persistence is retried on progress flush */ }
+            _publishLive?.Invoke(task, pool);
             EngineLog.Info($"dynamic split: task {task.TaskKey} now {pool.Count} slices");
         }
     }
 
-    private async Task DownloadSliceAsync(DownloadTask task, DownloadSegment seg,
+    private async Task DownloadSliceAsync(DownloadTask task, List<DownloadSegment> pool, DownloadSegment seg,
         DownloadDataFile file, RateLimiter[] limiters, CancellationToken ct)
     {
         var vaultTried = false;
@@ -520,7 +530,7 @@ public sealed class TaskRunner
                     HttpProber.AddDefaultHeaders(retryReq, task.Referer);
                     retryReq.Headers.TryAddWithoutValidation("Authorization", new TaskCredentials(cred.UserName, cred.Password).BasicHeader());
                     using var retryResp = await _prober.SendGuardedAsync(retryReq, ct);
-                    await DrainSliceAsync(task, seg, retryResp, file, knownLength, want, limiters, ct);
+                    await DrainSliceAsync(task, pool, seg, retryResp, file, knownLength, want, limiters, ct);
                     if (knownLength && seg.IsComplete) break;
                     continue;
                 }
@@ -537,14 +547,14 @@ public sealed class TaskRunner
             if (!resp.IsSuccessStatusCode && resp.StatusCode != HttpStatusCode.PartialContent)
                 throw NovaHttpException.FromStatus(resp.StatusCode, task.Url);
 
-            await DrainSliceAsync(task, seg, resp, file, knownLength, want, limiters, ct);
+            await DrainSliceAsync(task, pool, seg, resp, file, knownLength, want, limiters, ct);
 
             if (!knownLength && seg.End >= 0) break; // reached EOF
             if (knownLength && seg.IsComplete) break;
         }
     }
 
-    private async Task DrainSliceAsync(DownloadTask task, DownloadSegment seg, HttpResponseMessage resp,
+    private async Task DrainSliceAsync(DownloadTask task, List<DownloadSegment> pool, DownloadSegment seg, HttpResponseMessage resp,
         DownloadDataFile file, bool knownLength, long want, RateLimiter[] limiters, CancellationToken ct)
     {
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
@@ -580,6 +590,16 @@ public sealed class TaskRunner
             seg.Received += take;
             Interlocked.Add(ref _runReceived, take);
             Speed.Add(take);
+            _quotaHook?.Invoke(take);
+            if (_publishLive is not null)
+            {
+                var nowTicks = Environment.TickCount64;
+                if (nowTicks - Interlocked.Read(ref _lastLivePublishMs) >= 500)
+                {
+                    Interlocked.Exchange(ref _lastLivePublishMs, nowTicks);
+                    _publishLive(task, pool);
+                }
+            }
             _events.MaybeProgress(task, Speed.SpeedBps, 500);
             if (knownLength && seg.IsComplete) break;
         }
@@ -593,7 +613,7 @@ public sealed class TaskRunner
         var creds = _vault?.Find(task.Url) is { } v ? new TaskCredentials(v.UserName, v.Password) : null;
         var finalPath = await FtpTask.RunAsync(task, creds, (delta, rate) =>
         {
-            if (delta > 0) { Interlocked.Add(ref _runReceived, delta); Speed.Add(delta); }
+            if (delta > 0) { Interlocked.Add(ref _runReceived, delta); Speed.Add(delta); _quotaHook?.Invoke(delta); }
             _events.MaybeProgress(task, rate > 0 ? rate : Speed.SpeedBps, 500);
         }, ct);
 

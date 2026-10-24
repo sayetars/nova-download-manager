@@ -1,0 +1,2 @@
+https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.8-stable.tar.xz
+3.47.8

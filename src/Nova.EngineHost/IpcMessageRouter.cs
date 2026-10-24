@@ -92,6 +92,25 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                 case "engine_status":
                     return Envelope.Ok(id, StatusPayload());
 
+                case "quota_state":
+                    return Envelope.Ok(id, QuotaStatePayload());
+
+                case "task_segments":
+                {
+                    var req = env.PayloadAs<TaskKeyRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.TaskKey))
+                        return Envelope.Error(id, "bad_request", "protocol", "task_key required.");
+                    var views = _engine.GetSegmentViews(req.TaskKey);
+                    return Envelope.Ok(id, new
+                    {
+                        segments = views.Select(v => new
+                        {
+                            index = v.Index, start = v.Start, end = v.End, received = v.Received,
+                            done = v.End >= 0 && v.Received >= v.End - v.Start + 1,
+                        }),
+                    });
+                }
+
                 case "add_download":
                 {
                     var req = env.PayloadAs<AddDownloadRequest>() ?? new();
@@ -559,7 +578,21 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
         DataDir = _dataDir,
         ProtocolVersion = Protocol.Version,
         Platform = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+        Quota = QuotaStatePayload(),
     };
+
+    /// <summary>Byte-quota window state for the UI (IDM parity).</summary>
+    private QuotaStateDto QuotaStatePayload()
+    {
+        var q = _engine.Quota?.Snapshot();
+        return q is null
+            ? new QuotaStateDto()
+            : new QuotaStateDto
+            {
+                Enabled = q.Enabled, CapBytes = q.CapBytes, WindowMinutes = q.WindowMinutes,
+                UsedBytes = q.UsedBytes, Paused = q.Paused, ResumeInMs = q.ResumeInMs,
+            };
+    }
     private List<SchedulerService.RuleDto> SchedulerRulesRead()
     {
         var raw = _settings.Get("scheduler.rules");

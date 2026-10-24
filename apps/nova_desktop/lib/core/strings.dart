@@ -221,6 +221,24 @@ abstract class S {
   String get dropHere;
   String get minWindowSize;
   String get speedGraph;
+
+  // ---- T-013 additions (properties editor, vault, categories, quota, update) ----
+  String get referer;
+  String get userName;
+  String get password;
+  String get authentication;
+  String get quotaSection;
+  String get quotaEnabled;
+  String get quotaCap;
+  String get quotaWindow;
+  String get quotaPaused;
+  String get updateNow;
+  String get updatedCheck;
+  String get editTask;
+  String get priorityHigh;
+  String get priorityNormal;
+  String get priorityLow;
+  String get speedCapBytes;
 }
 
 class EnStrings implements S {
@@ -443,7 +461,26 @@ class EnStrings implements S {
   @override String get loginsVault => 'Site logins';
   @override String get dropHere => 'Drop links here';
   @override String get minWindowSize => 'Compact progress';
-  @override String get speedGraph => 'Speed';}
+  @override String get speedGraph => 'Speed';
+
+  // ---- T-013 additions ----
+  @override String get referer => 'Referer (page URL)';
+  @override String get userName => 'Username';
+  @override String get password => 'Password';
+  @override String get authentication => 'Authentication';
+  @override String get quotaSection => 'Byte quota';
+  @override String get quotaEnabled => 'Pause when the rolling cap is reached';
+  @override String get quotaCap => 'Cap (e.g. 500MB)';
+  @override String get quotaWindow => 'Window (minutes)';
+  @override String get quotaPaused => 'Byte quota reached — downloads will resume automatically';
+  @override String get updateNow => 'Check for updates';
+  @override String get updatedCheck => 'Update check finished';
+  @override String get editTask => 'Edit task';
+  @override String get priorityHigh => 'High';
+  @override String get priorityNormal => 'Normal';
+  @override String get priorityLow => 'Low';
+  @override String get speedCapBytes => 'Speed cap (bytes/s, 0 = off)';
+}
 
 
 class FaStrings implements S {
@@ -666,4 +703,23 @@ class FaStrings implements S {
   @override String get loginsVault => 'اطلاعات ورود سایت‌ها';
   @override String get dropHere => 'لینک را اینجا رها کنید';
   @override String get minWindowSize => 'نوار پیشرفت جمع‌وجور';
-  @override String get speedGraph => 'سرعت';}
+  @override String get speedGraph => 'سرعت';
+
+  // ---- T-013 additions ----
+  @override String get referer => 'ارجاع‌دهنده (آدرس صفحه)';
+  @override String get userName => 'نام کاربری';
+  @override String get password => 'گذرواژه';
+  @override String get authentication => 'احراز هویت';
+  @override String get quotaSection => 'سهمیه بایت';
+  @override String get quotaEnabled => 'وقتی سهمیه پر شد توقف کن';
+  @override String get quotaCap => 'سقف سهمیه (مثلاً 500MB)';
+  @override String get quotaWindow => 'پنجره زمانی (دقیقه)';
+  @override String get quotaPaused => 'سهمیه بایت پر شد — دانلودها خودکار ادامه می‌یابند';
+  @override String get updateNow => 'بررسی به‌روزرسانی';
+  @override String get updatedCheck => 'بررسی به‌روزرسانی انجام شد';
+  @override String get editTask => 'ویرایش دانلود';
+  @override String get priorityHigh => 'بالا';
+  @override String get priorityNormal => 'معمولی';
+  @override String get priorityLow => 'کم';
+  @override String get speedCapBytes => 'سقف سرعت (بایت/ثانیه، ۰ = خاموش)';
+}

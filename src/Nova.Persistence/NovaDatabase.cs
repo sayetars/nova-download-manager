@@ -90,6 +90,46 @@ public sealed class NovaDatabase : IAsyncDisposable
         }
     }
 
+    // ---- byte-quota checkpoints (QuotaTracker persistence) ---------------------
+
+    /// <summary>Checkpoint rows inside the window, oldest first.</summary>
+    public IReadOnlyList<(long AtMs, long Bytes)> QuotaSamplesSince(long cutoffMs)
+    {
+        lock (_txLock)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT at_ms, bytes FROM byte_quota_log WHERE at_ms >= @c ORDER BY at_ms";
+            cmd.Parameters.AddWithValue("@c", cutoffMs);
+            using var r = cmd.ExecuteReader();
+            var list = new List<(long, long)>();
+            while (r.Read()) list.Add((r.GetInt64(0), r.GetInt64(1)));
+            return list;
+        }
+    }
+
+    public void QuotaAppend(long atMs, long bytes)
+    {
+        lock (_txLock)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "INSERT INTO byte_quota_log(at_ms, bytes) VALUES(@a, @b)";
+            cmd.Parameters.AddWithValue("@a", atMs);
+            cmd.Parameters.AddWithValue("@b", bytes);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public void QuotaPruneBefore(long cutoffMs)
+    {
+        lock (_txLock)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM byte_quota_log WHERE at_ms < @c";
+            cmd.Parameters.AddWithValue("@c", cutoffMs);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _conn.DisposeAsync();

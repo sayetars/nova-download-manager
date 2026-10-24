@@ -3,6 +3,8 @@
 
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
 
 #include <memory>
 
@@ -33,6 +35,9 @@ class FlutterWindow : public Win32Window {
 
   // Nova engine IPC bridge.
   std::unique_ptr<nova::PipeBridge> pipe_bridge_;
+
+  // Nova drag & drop bridge (method channel "nova/dnd").
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> dnd_channel_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

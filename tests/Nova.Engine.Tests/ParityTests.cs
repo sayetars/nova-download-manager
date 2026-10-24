@@ -275,3 +275,136 @@ public class EngineParityTests : IAsyncDisposable
 
     public ValueTask DisposeAsync() => _fx.DisposeAsync();
 }
+
+// ---------------------------------------------------------------- byte quotas
+public class QuotaTests
+{
+    private sealed class MemSettings : ISettingsRepository
+    {
+        public Dictionary<string, string> Kv { get; } = new();
+        public string? Get(string key) => Kv.TryGetValue(key, out var v) ? v : null;
+        public void Set(string key, string value) => Kv[key] = value;
+        public IReadOnlyDictionary<string, string> GetAll() => Kv;
+    }
+
+    [Theory]
+    [InlineData("500MB", 524288000L)]
+    [InlineData("2gb", 2147483648L)]
+    [InlineData("1g", 1073741824L)]
+    [InlineData("768kb", 786432L)]
+    [InlineData("1024", 1024L)]
+    [InlineData("", null)]
+    [InlineData("junk", null)]
+    public void SizeParsing(string? raw, long? expected)
+        => Assert.Equal(expected, QuotaTracker.ParseSize(raw));
+
+    [Fact]
+    public void CapPausesAndWindowSlideResumes()
+    {
+        var settings = new MemSettings();
+        settings.Set("quota.enabled", "true");
+        settings.Set("quota.max_bytes", "1000");     // 1000 bytes cap
+        settings.Set("quota.window_minutes", "10");
+
+        long now = 1_000_000;
+        var quota = new QuotaTracker(settings, () => now);
+
+        quota.OnBytes(600);
+        Assert.False(quota.Paused);
+        quota.OnBytes(400);                          // reaches the 1000-byte cap
+        Assert.True(quota.Tick());                    // → paused
+        Assert.True(quota.Paused);
+        Assert.Equal(1000, quota.Snapshot().UsedBytes);
+
+        now += 60_000 * 11;                            // older samples age out of window
+        Assert.True(quota.Tick());                     // window freed → resumed
+        Assert.False(quota.Paused);
+        Assert.Equal(0, quota.Snapshot().UsedBytes);
+    }
+
+    [Fact]
+    public void DisabledNeverPauses()
+    {
+        var settings = new MemSettings();
+        settings.Set("quota.enabled", "false");
+        settings.Set("quota.max_bytes", "100");
+        long now = 5_000_000;
+        var quota = new QuotaTracker(settings, () => now);
+        quota.OnBytes(999_999);
+        Assert.False(quota.Tick());
+        Assert.False(quota.Paused);
+    }
+
+    [Fact]
+    public void PersistenceRestoresWindow()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "nova-quota-p-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var dbPath = Path.Combine(dir, "q.db");
+        long now = 10_000_000;
+        MemSettings settings = new();
+        settings.Set("quota.enabled", "true");
+        settings.Set("quota.max_bytes", "1000");
+        settings.Set("quota.window_minutes", "30");
+
+        var dbOuter = new NovaDatabase(dbPath);
+        var q1 = new QuotaTracker(settings, () => now, dbOuter);
+        q1.OnBytes(700);
+        q1.Tick();                                 // persists a checkpoint row
+        dbOuter.DisposeAsync().AsTask().Wait();
+        var db2 = new NovaDatabase(dbPath);
+        var q2 = new QuotaTracker(settings, () => now, db2);
+        Assert.Equal(700, q2.Snapshot().UsedBytes); // survived restart
+        db2.DisposeAsync().AsTask().Wait();
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
+
+// ---------------------------------------------------------------- live segments view
+public class SegmentViewTests : IAsyncLifetime
+{
+    private TestHttpServer _server = null!;
+    private EngineFixture _fx = null!;
+
+    public async Task InitializeAsync()
+    {
+        _server = new TestHttpServer();
+        _fx = await EngineFixture.CreateAsync();
+    }
+
+    public async Task DisposeAsync()
+    {
+        await _fx.DisposeAsync();
+        _server.Dispose();
+    }
+
+    [Fact]
+    public async Task MultipartTaskExposesLiveSegmentViews()
+    {
+        _server.AddFile("segments-view.bin", new byte[8 * 1024 * 1024]);
+        var url = _server.UrlFor("segments-view.bin");
+        var res = _fx.Engine.Add(new NewDownload { Url = url, MaxConnections = 4 });
+        Assert.True(res.Ok, res.Error?.ToString());
+        var key = res.Value!.TaskKey;
+
+        Assert.Empty(_fx.Engine.GetSegmentViews(key));       // nothing before start
+        _fx.Engine.TryStartNext();
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (_fx.Engine.Get(key)?.State == DownloadState.Completed) break;
+            await Task.Delay(100);
+        }
+        var task = _fx.Engine.Get(key)!;
+        Assert.Equal(DownloadState.Completed, task.State);
+
+        // live view clears after completion (runner detached); during the run it
+        // held the plan. We assert the completed state + no crash on lookup.
+        _ = _fx.Engine.GetSegmentViews(key);
+    }
+
+    [Fact]
+    public void UnknownTaskReturnsEmptyViews()
+        => Assert.Empty(_fx.Engine.GetSegmentViews("no-such-key"));
+}

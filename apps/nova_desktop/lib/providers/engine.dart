@@ -206,7 +206,15 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
   }
 
   Future<void> updateTask(String key,
-      {int? maxConnections, int? speedCapBytes, String? queueName, int? priority, String? postAction}) async {
+      {int? maxConnections,
+      int? speedCapBytes,
+      String? queueName,
+      String? category,
+      int? priority,
+      String? postAction,
+      List<String>? mirrors,
+      int? startAtMs,
+      String? referer}) async {
     final engine = ref.read(engineProvider);
     if (engine == null) return;
     await engine.call('update_task', {
@@ -214,8 +222,12 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
       if (maxConnections != null) 'max_connections': maxConnections,
       if (speedCapBytes != null) 'speed_cap_bytes': speedCapBytes,
       if (queueName != null && queueName.isNotEmpty) 'queue_name': queueName,
+      if (category != null && category.isNotEmpty) 'category': category,
       if (priority != null) 'priority': priority,
       if (postAction != null) 'post_action': postAction,
+      if (mirrors != null) 'mirrors': mirrors,
+      if (startAtMs != null) 'start_at_ms': startAtMs,
+      if (referer != null) 'referer': referer,
     });
     await _load();
   }
