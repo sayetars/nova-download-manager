@@ -2,6 +2,32 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [1.4.1] — 2026-10-25
+
+**BitTorrent polish** — the v1.4.x roadmap items: PEX peer exchange, DHT peer-store serving, per-file selection in multi-file torrents, UDP tracker scrape, and super-seeding. C# suite grew 160 → 169 tests (+9 in `TorrentV141Tests`); Flutter 8/8 + 0 analyze errors; smoke PASS + parity 12/12 + tarball clean-env PASS; tarball round-trip verified on Dropbox.
+
+### Added — engine (`src/Nova.Engine/Torrent/`)
+- **PEX (BEP-11)**: new `PexMessage` codec (binary-safe `added`/`added.f`/`dropped` compact lists, tolerant decoding, port-0 filtering); `ut_pex` advertised in the BEP-10 extension handshake (fixed id 2, alongside `ut_metadata`); per-peer sent-set diffing in `TorrentSession.BroadcastPexAsync` (30 s cadence, loop-safe — only directly-connected peers are announced); inbound PEX feeds the discovery queue with dedup; per-client `v`/`reqq` parsing from the extension handshake (`PeerClientName`, `PeerRequestQueueDepth`).
+- **DHT peer-store serving (BEP-5)**: `announce_peer` now validates the token and STORES the announced endpoint (sender-IP + announced port, `implied_port` honored, 64 peers/hash, 30-min TTL); `get_peers` replies serve stored peers as `values` (compact form) and fall back to the 8 closest routing-table nodes; `find_node` implemented with closest-node replies; DHT loop in `TorrentSession` is now lifelong (get_peers + announce every 90 s, was one-shot).
+- **Per-file selection (multi-file torrents)**: `TorrentMeta.PieceMaskForFiles` / `SelectedFileBytes` piece↔file mapping; `PiecePicker.Wanted` mask gates picking, completion (`IsComplete` = all wanted pieces) and remaining-bytes; selection flows task (`selected_files` CSV) → spec → session; unwanted pieces are never requested and completion splits only the selected files; the wanted mask persists in the bitfield sidecar (backward-compatible layout) and is re-derived to a file set on resume; partial tasks report selected totals (`TotalBytes` = selected bytes).
+- **UDP tracker scrape (BEP-15 action=2)**: `UdpTrackerClient.ScrapeAsync` for 1..74 info-hashes (seeders/completed/leechers), connection-id reuse + stale reconnect, error-action handling (tested against a loopback scrape harness).
+- **Super-seeding (BEP-16)**: `TorrentSessionOptions.SuperSeed` / per-task `super_seed` — in seed mode we send NO bitfield; each peer is dripped one unrevealed piece via HAVE, and only after the peer confirms (its own HAVE back) is the piece revealed swarm-wide and the next piece assigned (round-robin fallback once every piece is out).
+- **Protocol detail**: peer-wire `reqq` clamps our request pipeline to the peer's advertised depth; `TorrentPeer.TryParseCompact` for tolerant PEX/DHT parsing.
+
+### Added — persistence / IPC
+- SQLite migration v9 (`selected_files` CSV, `super_seed`); repository mapping end-to-end.
+- `AddDownloadRequest.SelectedFiles` / `.SuperSeed`, `AddDownloadSpec`, `TaskSnapshot.SelectedFiles` / `.SuperSeed` wired through the router.
+
+### Added — UI (Flutter, EN + FA)
+- Add dialog: local `.torrent` files are parsed in-app (new minimal bencode reader `core/torrent_meta.dart`) and listed with per-file checkboxes (name + size) → partial download; "Super-seeding (BEP-16)" toggle appears when seeding is enabled; seeding toggle now also applies to `.torrent` files (not just magnets); new strings EN + FA (superSeedTorrent, torrentFiles, torrentFilesAll…).
+
+### Verified end-to-end (loopback-only)
+- PEX codec roundtrip incl. flags + malformed/truncated/port-0 tolerance; wire-level PEX routed by the receiver's declared id between two live handshaked clients.
+- DHT: announce stored → get_peers serves it back as `values`; garbage token rejected (store unchanged).
+- UDP scrape stats parsed for multiple hashes.
+- Multi-file E2E with file selection: only the selected file is downloaded/split (shared boundary piece included), byte-exact.
+- Super-seed E2E: byte-exact transfer through the HAVE-drip protocol (drip logs asserted).
+
 ## [1.4.0] — 2026-10-24
 
 **BitTorrent core** — the last headline gap vs FDM / Motrix / JDownloader 2 / qBittorrent. A real, protocol-correct v1 stack implemented from the specs and verified against our own seeder + loopback tracker (no external swarm dependency in tests). C# suite grew 127 → 160 tests (+33 across `TorrentProtocolTests`, `TorrentE2eTests`, `TorrentEngineTests`); Flutter 8/8 + 0 analyze errors.

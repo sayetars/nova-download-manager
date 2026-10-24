@@ -168,6 +168,8 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
     String? expectedHash,
     bool sequential = false,
     bool seedAfter = false,
+    bool superSeed = false,
+    String? selectedFiles,
   }) async {
     final engine = ref.read(engineProvider);
     if (engine == null) return null;
@@ -184,6 +186,8 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
       if (expectedHash != null && expectedHash.isNotEmpty) 'expected_hash': expectedHash,
       if (sequential) 'sequential': true,
       if (seedAfter) 'seed_after': true,
+      if (superSeed) 'super_seed': true,
+      if (selectedFiles != null && selectedFiles.isNotEmpty) 'selected_files': selectedFiles,
       'auto_start': autoStart,
     });
     await _load();

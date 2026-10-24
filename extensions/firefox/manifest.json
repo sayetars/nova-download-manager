@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nova Download Manager",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Hand downloads and supported videos to Nova Download Manager \u2014 quality picker included.",
   "browser_specific_settings": {
     "gecko": {

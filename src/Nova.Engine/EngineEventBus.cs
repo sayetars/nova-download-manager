@@ -145,6 +145,11 @@ public sealed record TaskSnapshot
     public string? BtInfoHash { get; init; }
     /// <summary>BitTorrent: keeps serving after completion (seeding).</summary>
     public bool SeedAfter { get; init; }
+    // ---- v1.4.1 additions ----
+    /// <summary>BitTorrent multi-file selection CSV ("0,2,5"; null = whole torrent).</summary>
+    public string? SelectedFiles { get; init; }
+    /// <summary>BitTorrent: super-seeding (BEP-16) enabled for this task.</summary>
+    public bool SuperSeed { get; init; }
 
     public static TaskSnapshot From(DownloadTask t) => new()
     {
@@ -182,6 +187,8 @@ public sealed record TaskSnapshot
         SourceCount = 1 + t.Mirrors.Count(u => u.StartsWith("http", StringComparison.OrdinalIgnoreCase)),
         BtInfoHash = string.IsNullOrEmpty(t.BtInfoHash) ? null : t.BtInfoHash,
         SeedAfter = t.SeedAfter,
+        SelectedFiles = string.IsNullOrEmpty(t.SelectedFiles) ? null : t.SelectedFiles,
+        SuperSeed = t.SuperSeed,
     };
 }
 

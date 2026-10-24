@@ -25,6 +25,10 @@ public sealed class DhtClient : IDisposable
     private readonly List<Bucket> _buckets = new();   // 160 buckets, lazily created
     private readonly Dictionary<byte[], string> _tokens = new(new ByteArrayComparer());
     private readonly Dictionary<string, PendingQuery> _pending = new();
+    /// <summary>v1.4.1: announced peers per info-hash (BEP-5 serving) — hex → (compact, expiry).</summary>
+    private readonly Dictionary<string, List<(byte[] Compact, DateTime ExpiresAt)>> _peerStore = new();
+    private const int PeerStoreMaxPerHash = 64;
+    private static readonly TimeSpan PeerStoreTtl = TimeSpan.FromMinutes(30);
     private int _txnCounter = Random.Shared.Next(0, int.MaxValue / 2);
     private Task? _receiveLoop;
     private CancellationTokenSource? _cts;
@@ -269,7 +273,8 @@ public sealed class DhtClient : IDisposable
             var response = q switch
             {
                 "ping" => BuildR(txn, null),
-                "find_node" or "get_peers" => GetPeersReply(txn, senderId),
+                "find_node" => FindNodeReply(txn, msg),
+                "get_peers" => GetPeersReply(txn, senderId, msg.Get("a")?.Get("info_hash")?.AsString),
                 "announce_peer" => ValidateAndStoreAnnounce(txn, msg, from),
                 _ => BuildError(txn, 204, "Method Unknown"),
             };
@@ -291,13 +296,13 @@ public sealed class DhtClient : IDisposable
             .Encode();
     }
 
-    private byte[] GetPeersReply(byte[] txn, byte[]? senderId)
+    /// <summary>find_node reply: id + k closest nodes we know (routing-table serving).</summary>
+    private byte[] FindNodeReply(byte[] txn, BencValue query)
     {
-        // token bound to the sender address + rotating minute window (BEP-5 security)
-        var token = MakeToken(senderId);
+        var target = query.Get("a")?.Get("target")?.AsString ?? Array.Empty<byte>();
         var r = BencValue.OfDict()
             .Set("id", BencValue.Of(NodeId))
-            .Set("token", BencValue.Of(Encoding.UTF8.GetBytes(token)));
+            .Set("nodes", BencValue.Of(ClosestNodesBin(target, 8)));
         return BencValue.OfDict()
             .Set("t", BencValue.Of(txn))
             .Set("y", BencValue.Of("r"))
@@ -305,6 +310,32 @@ public sealed class DhtClient : IDisposable
             .Encode();
     }
 
+    private byte[] GetPeersReply(byte[] txn, byte[]? senderId, byte[]? infoHash)
+    {
+        // token bound to the sender address + rotating minute window (BEP-5 security)
+        var token = MakeToken(senderId);
+        var r = BencValue.OfDict()
+            .Set("id", BencValue.Of(NodeId))
+            .Set("token", BencValue.Of(Encoding.UTF8.GetBytes(token)));
+
+        if (infoHash is { Length: IdLength })
+        {
+            // v1.4.1: serve stored peers for this info-hash (BEP-5 "values")
+            var stored = TakeStoredPeers(infoHash);
+            if (stored.Count > 0)
+                r.Set("values", BencValue.Of(stored.Select(BencValue.Of).ToList()));
+            else
+                r.Set("nodes", BencValue.Of(ClosestNodesBin(infoHash, 8)));
+        }
+        return BencValue.OfDict()
+            .Set("t", BencValue.Of(txn))
+            .Set("y", BencValue.Of("r"))
+            .Set("r", r)
+            .Encode();
+    }
+
+    /// <summary>Valid token → store the announced peer (implied_port uses the sender's port)
+    /// and answer OK; otherwise protocol error (BEP-5).</summary>
     private byte[]? ValidateAndStoreAnnounce(byte[] txn, BencValue query, IPEndPoint from)
     {
         var a = query.Get("a");
@@ -312,7 +343,84 @@ public sealed class DhtClient : IDisposable
         var senderId = a?.Get("id")?.AsString;
         if (token is null || token != MakeToken(senderId))
             return BuildError(txn, 203, "Protocol Error (bad token)");
+
+        var infoHash = a?.Get("info_hash")?.AsString;
+        if (infoHash is { Length: IdLength })
+        {
+            var implied = a?.Get("implied_port")?.AsInteger == 1;
+            var port = implied
+                ? from.Port
+                : (int)(a?.Get("port")?.AsInteger ?? 0);
+            if (port > 0)
+            {
+                var compact = new byte[6];
+                from.Address.MapToIPv4().GetAddressBytes().CopyTo(compact, 0);
+                BinaryPrimitives.WriteUInt16BigEndian(compact.AsSpan(4), (ushort)port);
+                lock (_lock)
+                {
+                    if (!_peerStore.TryGetValue(Convert.ToHexString(infoHash), out var list))
+                        _peerStore[Convert.ToHexString(infoHash)] = list = new List<(byte[], DateTime)>();
+                    // replace same endpoint, cap the list, keep newest
+                    list.RemoveAll(p => p.Compact.AsSpan().SequenceEqual(compact));
+                    list.Add((compact, DateTime.UtcNow.Add(PeerStoreTtl)));
+                    if (list.Count > PeerStoreMaxPerHash)
+                        list.RemoveRange(0, list.Count - PeerStoreMaxPerHash);
+                }
+            }
+        }
         return BuildR(txn, null);
+    }
+
+    private List<byte[]> TakeStoredPeers(byte[] infoHash)
+    {
+        lock (_lock)
+        {
+            var key = Convert.ToHexString(infoHash);
+            if (!_peerStore.TryGetValue(key, out var list)) return [];
+            list.RemoveAll(p => p.ExpiresAt < DateTime.UtcNow);
+            if (list.Count == 0) { _peerStore.Remove(key); return []; }
+            // return up to 50 newest (BEP-5: single packet worth)
+            return list.Skip(Math.Max(0, list.Count - 50)).Select(p => p.Compact).ToList();
+        }
+    }
+
+    /// <summary>Test/telemetry helper: how many live peers are stored for an info-hash.</summary>
+    public int StoredPeerCount(byte[] infoHash)
+    {
+        lock (_lock)
+        {
+            if (!_peerStore.TryGetValue(Convert.ToHexString(infoHash), out var list)) return 0;
+            list.RemoveAll(p => p.ExpiresAt < DateTime.UtcNow);
+            return list.Count;
+        }
+    }
+
+    /// <summary>Test/telemetry helper: do we hold an announce token from this node id?</summary>
+    public bool HasTokenFor(byte[] nodeId)
+    {
+        lock (_lock) return _tokens.ContainsKey(nodeId);
+    }
+
+    /// <summary>Builds the binary "nodes" string: 26 bytes per node, closest first.</summary>
+    private byte[] ClosestNodesBin(byte[] target, int max)
+    {
+        List<DhtNodeInfo> nodes;
+        lock (_lock)
+            nodes = _buckets.SelectMany(b => b.Nodes)
+                .Where(n => n.Id.Length == IdLength)
+                .OrderBy(n => DistanceRank(n.Id, target))
+                .Take(max)
+                .ToList();
+        var buf = new byte[26 * nodes.Count];
+        var off = 0;
+        foreach (var n in nodes)
+        {
+            n.Id.CopyTo(buf, off);
+            n.Endpoint.Address.MapToIPv4().GetAddressBytes().CopyTo(buf, off + 20);
+            BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(off + 24), (ushort)n.Endpoint.Port);
+            off += 26;
+        }
+        return buf;
     }
 
     private string MakeToken(byte[]? senderId)

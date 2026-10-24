@@ -59,12 +59,18 @@ class TaskUi {
     this.etaSeconds = -1,
     this.btInfoHash,
     this.seedAfter = false,
+    this.selectedFiles,
+    this.superSeed = false,
   });
 
   /// BitTorrent info-hash (v1.4.0) — null for non-torrent tasks.
   final String? btInfoHash;
   /// BitTorrent: keeps serving after completion (v1.4.0).
   final bool seedAfter;
+  /// BitTorrent multi-file selection CSV "0,2,5" (v1.4.1) — null = whole torrent.
+  final String? selectedFiles;
+  /// BitTorrent: super-seeding (BEP-16) enabled (v1.4.1).
+  final bool superSeed;
 
   bool get isTorrent => kind == 'torrent';
 
@@ -105,6 +111,8 @@ class TaskUi {
         completedAtMs: j['completed_at_ms'] as int?,
         btInfoHash: j['bt_info_hash'] as String?,
         seedAfter: (j['seed_after'] ?? false) as bool,
+        selectedFiles: j['selected_files'] as String?,
+        superSeed: (j['super_seed'] ?? false) as bool,
       );
 
   TaskUi withProgress(Map<String, dynamic> p) => TaskUi(
@@ -135,6 +143,8 @@ class TaskUi {
         etaSeconds: (p['eta_seconds'] as int?) ?? etaSeconds,
         btInfoHash: btInfoHash,
         seedAfter: seedAfter,
+        selectedFiles: selectedFiles,
+        superSeed: superSeed,
       );
 }
 

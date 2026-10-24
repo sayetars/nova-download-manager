@@ -43,10 +43,16 @@ public sealed class PeerWireClient : IAsyncDisposable
         new Dictionary<string, int>();
     /// <summary>Our ut_metadata extension id (0 = peer does not support it).</summary>
     public int UtMetadataId { get; private set; }
+    /// <summary>Our ut_pex extension id (0 = peer does not support PEX) — v1.4.1 BEP-11.</summary>
+    public int UtPexId { get; private set; }
     public int PeerMetadataSize { get; private set; } = -1;
+    /// <summary>Peer ids from the BEP-10 handshake for logging/telemetry (may be empty).</summary>
+    public string? PeerClientName { get; private set; }
     /// <summary>Statistics.</summary>
     public long BytesDown { get; private set; }
     public long BytesUp { get; private set; }
+    /// <summary>Peer's advertised request pipeline depth (BEP-10 reqq, clamped) — v1.4.1.</summary>
+    public int PeerRequestQueueDepth { get; private set; } = MaxPendingBlocks;
 
     public PeerWireClient(TcpClient tcp, byte[] infoHash, byte[] ourPeerId)
     {
@@ -105,12 +111,15 @@ public sealed class PeerWireClient : IAsyncDisposable
 
     private byte[] BuildExtensionHandshake()
     {
+        // fixed extension ids (both directions agree on OUR ids for messages we receive)
         var m = BencValue.OfDict()
-            .Set("ut_metadata", BencValue.Of(1));
+            .Set("ut_metadata", BencValue.Of(1))
+            .Set("ut_pex", BencValue.Of(2));
         var dict = BencValue.OfDict()
             .Set("m", m)
             .Set("p", BencValue.Of((_tcp.Client.LocalEndPoint as IPEndPoint)?.Port ?? 0))
-            .Set("v", BencValue.Of("Nova DM 1.4.0"));
+            .Set("v", BencValue.Of("Nova DM 1.4.1"))
+            .Set("reqq", BencValue.Of(PeerWireClient.MaxPendingBlocks));
         if (MetadataSize >= 0)
             dict.Set("metadata_size", BencValue.Of(MetadataSize));
         return dict.Encode();
@@ -157,8 +166,9 @@ public sealed class PeerWireClient : IAsyncDisposable
     }
 
     // ------------------------------------------------------------------ messages
-    /// <summary>Extension messages may be sent externally (magnet fetch).</summary>
-    internal Task SendMessageInternalAsync(byte id, int extendedId, ReadOnlyMemory<byte> payload,
+    /// <summary>Extension messages may be sent externally (magnet fetch, PEX broadcast,
+    /// tests exercising the wire).</summary>
+    public Task SendMessageInternalAsync(byte id, int extendedId, ReadOnlyMemory<byte> payload,
         CancellationToken ct) => SendMessageAsync(id, extendedId, payload, ct);
 
     private async Task SendMessageAsync(byte id, int extraPrefix, ReadOnlyMemory<byte> payload,
@@ -322,9 +332,14 @@ public sealed class PeerWireClient : IAsyncDisposable
                             }
                             PeerExtensions = exts;
                             if (exts.TryGetValue("ut_metadata", out var utm)) UtMetadataId = utm;
+                            if (exts.TryGetValue("ut_pex", out var utp)) UtPexId = utp;
                         }
                         if (dict.Get("metadata_size") is { } ms)
                             PeerMetadataSize = (int)ms.AsInteger;
+                        if (dict.Get("v")?.AsUtf8 is { Length: > 0 } v)
+                            PeerClientName = v;
+                        if (dict.Get("reqq")?.AsInteger is { } rq && rq > 0)
+                            PeerRequestQueueDepth = (int)Math.Min(rq, 64);
                     }
                     catch (InvalidDataException) { /* peer sent junk — ignore */ }
                 }

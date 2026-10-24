@@ -120,6 +120,13 @@ public sealed class DownloadTask
     /// <summary>BitTorrent: keep serving (seeding) after completion (v1.4.0).</summary>
     public bool SeedAfter { get; set; }
 
+    /// <summary>BitTorrent multi-file selection: comma-separated file indices
+    /// ("0,2,5"); empty = whole torrent (v1.4.1).</summary>
+    public string SelectedFiles { get; set; } = string.Empty;
+
+    /// <summary>BitTorrent: super-seeding (BEP-16) while seeding this task (v1.4.1).</summary>
+    public bool SuperSeed { get; set; }
+
     [JsonIgnore] public bool HasSpeedCap => SpeedCapBytes > 0;
 
     [JsonIgnore] public IReadOnlyList<string> Mirrors =>

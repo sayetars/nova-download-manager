@@ -40,6 +40,37 @@ public sealed class TorrentMeta
         ? TotalLength - PieceOffset(index)
         : PieceLength;
 
+    // ------------------------------------------------------------------ file selection (v1.4.1)
+    /// <summary>Computes the wanted-piece mask for the selected file indices.
+    /// A piece is wanted when it overlaps ANY selected file. Null/empty selection = all.</summary>
+    public bool[] PieceMaskForFiles(IReadOnlyList<int> fileIndices)
+    {
+        if (fileIndices.Count == 0)
+            return Enumerable.Repeat(true, PieceCount).ToArray();
+        var mask = new bool[PieceCount];
+        foreach (var idx in fileIndices)
+        {
+            if (idx < 0 || idx >= Files.Length)
+                throw new ArgumentOutOfRangeException(nameof(fileIndices), $"file index {idx} out of range");
+            var f = Files[idx];
+            var firstPiece = (int)(f.Offset / PieceLength);
+            var lastPiece = (int)((f.Offset + f.Length - 1) / PieceLength);   // inclusive
+            for (var p = firstPiece; p <= Math.Min(lastPiece, PieceCount - 1); p++)
+                mask[p] = true;
+        }
+        return mask;
+    }
+
+    /// <summary>Total bytes of the selected files (task.TotalBytes for partial downloads).</summary>
+    public long SelectedFileBytes(IReadOnlyList<int> fileIndices)
+    {
+        if (fileIndices.Count == 0) return TotalLength;
+        long sum = 0;
+        foreach (var idx in fileIndices)
+            if (idx >= 0 && idx < Files.Length) sum += Files[idx].Length;
+        return sum;
+    }
+
     public static TorrentMeta Parse(byte[] raw)
         => Parse(raw.AsSpan());
 

@@ -96,3 +96,44 @@ engine exits or the task is removed).
 
 **Settings** — `bt_dht` (default on), `bt_upload_cap` (bytes/s while seeding),
 `bt_listen_port` (fixed port) / `bt_listen=1` (ephemeral), `bt_metadata_timeout` (seconds).
+
+## v1.4.1 — BitTorrent polish (PEX / DHT serving / file selection / scrape / super-seed)
+
+**PEX (BEP-11)** — `PexMessage` codec encodes/decodes the `added` / `added.f` / `dropped`
+compact lists (binary-safe, port-0 entries filtered, malformed payloads tolerated).
+`ut_pex` is advertised in our BEP-10 handshake with the fixed id 2; the session keeps a
+per-peer sent-set and broadcasts DIFFS every 30 s (only directly-connected peers are
+announced — no gossip of second-hand endpoints), and inbound PEX feeds the discovery
+queue with dedup. The extension handshake also parses the peer's `v` (client name) and
+`reqq` (request-pipeline depth, clamped 1..64).
+
+**DHT peer-store serving (BEP-5)** — `announce_peer` with a valid token now STORES the
+announced endpoint (sender IP + announced port, `implied_port` honored; 64 peers per
+info-hash, 30-minute TTL). `get_peers` replies carry stored peers as `values` (compact
+6-byte form, ≤50 per reply) and otherwise fall back to the 8 closest routing-table
+nodes; `find_node` is implemented the same way. The per-session DHT loop is lifelong:
+every 90 s it re-queries `get_peers`, feeds discovered peers to the pool, and re-announces
+our listen port.
+
+**Per-file selection (multi-file torrents)** — `TorrentMeta.PieceMaskForFiles` maps
+selected file indices to the wanted-piece mask (pieces shared at file boundaries are
+wanted when ANY overlapping file is selected); `PiecePicker.SetWanted` gates picking,
+completion (`IsComplete` = every WANTED piece verified) and remaining-bytes. Selection
+travels as `selected_files` CSV on the task (IPC `add_download`), persists in the
+bitfield sidecar (backward-compatible tail after the have-map), is re-derived to a file
+set on resume, and completion splits ONLY the selected files. Partial tasks report
+selected totals so progress shows 0→100 % for the chosen subset. The Flutter Add dialog
+lists a local `.torrent`'s files (in-app bencode reader) with checkboxes.
+
+**UDP tracker scrape (BEP-15 action=2)** — `UdpTrackerClient.ScrapeAsync` takes 1..74
+info-hashes, reuses cached connection ids (stale reconnect once), and returns
+seeders/completed/leechers per hash; tracker error actions surface as `InvalidDataException`.
+
+**Super-seeding (BEP-16)** — per-task `super_seed` (or `bt_superseed=1`). In seed mode we
+send NO bitfield; each peer receives exactly one unrevealed piece via HAVE. When the peer
+confirms (its own HAVE back), the piece is revealed to the rest of the swarm and the next
+piece is dripped; once every piece has been revealed at least once, assignment falls back
+to round-robin. Verified byte-exact against our own downloader.
+
+**Persistence** — SQLite migration v9 adds `selected_files` (CSV) and `super_seed`
+(per-task); `TaskSnapshot` exposes `selected_files` and `super_seed` to the UI.

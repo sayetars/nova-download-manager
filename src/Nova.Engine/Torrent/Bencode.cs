@@ -276,4 +276,15 @@ public readonly record struct TorrentPeer(IPAddress Address, int Port)
         var port = BinaryPrimitives.ReadUInt16BigEndian(six.Slice(4, 2));
         return new TorrentPeer(ip, port);
     }
+
+    /// <summary>Non-throwing compact parse (PEX / DHT tolerate junk entries).</summary>
+    public static bool TryParseCompact(ReadOnlySpan<byte> six, out TorrentPeer peer)
+    {
+        peer = default;
+        if (six.Length < 6) return false;
+        var port = BinaryPrimitives.ReadUInt16BigEndian(six.Slice(4, 2));
+        if (port == 0) return false;   // port 0 is never a valid peer endpoint
+        peer = ParseCompact(six);
+        return true;
+    }
 }

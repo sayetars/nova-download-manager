@@ -48,6 +48,7 @@ public sealed class NovaDatabase : IAsyncDisposable
         if (SchemaVersion < 6) { RunMigration(6, Sql.Migration6); SchemaVersion = 6; }
         if (SchemaVersion < 7) { RunMigration(7, Sql.Migration7); SchemaVersion = 7; }
         if (SchemaVersion < 8) { RunMigration(8, Sql.Migration8); SchemaVersion = 8; }
+        if (SchemaVersion < 9) { RunMigration(9, Sql.Migration9); SchemaVersion = 9; }
     }
 
     private void RunMigration(int version, string sql)
@@ -293,6 +294,13 @@ internal static class Sql
     public const string Migration8 = """
         ALTER TABLE download_task ADD COLUMN bt_info_hash TEXT NOT NULL DEFAULT '';
         ALTER TABLE download_task ADD COLUMN seed_after INTEGER NOT NULL DEFAULT 0;
+        """;
+
+    /// <summary>v1.4.1: BitTorrent multi-file selection (CSV of file indices; '' = all)
+    /// and per-task super-seeding (BEP-16).</summary>
+    public const string Migration9 = """
+        ALTER TABLE download_task ADD COLUMN selected_files TEXT NOT NULL DEFAULT '';
+        ALTER TABLE download_task ADD COLUMN super_seed INTEGER NOT NULL DEFAULT 0;
         """;
 
     public const string Migration7 = """

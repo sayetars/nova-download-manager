@@ -17,6 +17,12 @@ public sealed class PiecePicker
 
     public bool Sequential { get; set; }
 
+    /// <summary>v1.4.1: per-piece wanted mask for multi-file selection (null = all wanted).
+    /// Unwanted pieces are never picked, never counted toward completion, and their
+    /// availability is ignored. The mask is owned by TorrentSession (set once at start).</summary>
+    public bool[]? Wanted { get; set; }
+    public int WantedCount { get; private set; }
+
     public PiecePicker(int pieceCount, long pieceLength, long totalLength)
     {
         _pieceCount = pieceCount;
@@ -26,12 +32,43 @@ public sealed class PiecePicker
         _pendingBlocks = new HashSet<long>[pieceCount];
         for (var i = 0; i < pieceCount; i++) _pendingBlocks[i] = new HashSet<long>();
         _have = new bool[pieceCount];
+        WantedCount = pieceCount;
     }
+
+    /// <summary>Sets the wanted mask (computed from selected files). Passing null clears it.
+    /// Pieces already marked have that stay have — the mask only gates future picking.</summary>
+    public void SetWanted(bool[]? mask)
+    {
+        lock (this)
+        {
+            Wanted = mask;
+            WantedCount = mask is null
+                ? _pieceCount
+                : mask.Take(_pieceCount).Count(w => w);
+        }
+    }
+
+    private bool IsWanted(int piece)
+        => Wanted is null || (piece < Wanted.Length && Wanted[piece]);
 
     public int HaveCount { get; private set; }
     public int PieceCount => _pieceCount;
 
-    public bool IsComplete => HaveCount == _pieceCount;
+    /// <summary>All WANTED pieces downloaded (partial-download completion for file selection).</summary>
+    public bool IsComplete
+    {
+        get
+        {
+            lock (this)
+            {
+                if (Wanted is null) return HaveCount == _pieceCount;
+                var wantedHave = 0;
+                for (var i = 0; i < _pieceCount; i++)
+                    if (_have[i] && IsWanted(i)) wantedHave++;
+                return wantedHave >= WantedCount;
+            }
+        }
+    }
 
     public bool this[int piece] => _have[piece];
 
@@ -108,7 +145,7 @@ public sealed class PiecePicker
             if (Sequential)
             {
                 for (var i = 0; i < _pieceCount; i++)
-                    if (!_have[i] && i < peerBits.Length && peerBits[i]) { bestPiece = i; break; }
+                    if (!_have[i] && IsWanted(i) && i < peerBits.Length && peerBits[i]) { bestPiece = i; break; }
             }
             else
             {
@@ -116,7 +153,7 @@ public sealed class PiecePicker
                 var candidates = new List<int>();
                 for (var i = 0; i < _pieceCount; i++)
                 {
-                    if (_have[i] || i >= peerBits.Length || !peerBits[i]) continue;
+                    if (_have[i] || !IsWanted(i) || i >= peerBits.Length || !peerBits[i]) continue;
                     var a = _availability[i];
                     if (a < bestAvail) { bestAvail = a; candidates.Clear(); candidates.Add(i); }
                     else if (a == bestAvail && candidates.Count < 4) candidates.Add(i);
@@ -162,14 +199,14 @@ public sealed class PiecePicker
     public long PieceLengthOf(int piece)
         => piece == _pieceCount - 1 ? _totalLength - (long)piece * _pieceLength : _pieceLength;
 
-    /// <summary>Remaining bytes to download.</summary>
+    /// <summary>Remaining bytes to download (wanted pieces only).</summary>
     public long RemainingBytes(Func<int, long> pieceSizeOf)
     {
         lock (this)
         {
             long left = 0;
             for (var i = 0; i < _pieceCount; i++)
-                if (!_have[i]) left += pieceSizeOf(i);
+                if (!_have[i] && IsWanted(i)) left += pieceSizeOf(i);
             return left;
         }
     }

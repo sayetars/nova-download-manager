@@ -130,9 +130,13 @@ public static class HttpTracker
     }
 }
 
+/// <summary>UDP scrape reply for one info-hash (BEP-15 action=2).</summary>
+public readonly record struct TrackerScrape(int Seeders, int Completed, int Leechers);
+
 /// <summary>
 /// UDP tracker client (BEP-15): connection handshake + announce, both with 32-bit
 /// transaction IDs. Retries on timeout; connection ids are cached per endpoint.
+/// v1.4.1 adds scrape (action=2) for swarm health without joining it.
 /// </summary>
 public sealed class UdpTrackerClient : IDisposable
 {
@@ -255,6 +259,73 @@ public sealed class UdpTrackerClient : IDisposable
         for (var i = 20; i + 6 <= reply.Length; i += 6)
             peers.Add(TorrentPeer.ParseCompact(reply.AsSpan(i)));
         return new TrackerPeers(peers, interval, seeders, leechers, null);
+    }
+
+    // ------------------------------------------------------------------ scrape (v1.4.1)
+    /// <summary>Scrapes swarm stats for one or more info-hashes (BEP-15 action=2).
+    /// udp://host:port/announce → the scrape endpoint is the same host:port.</summary>
+    public async Task<IReadOnlyList<TrackerScrape>> ScrapeAsync(string announceUrl,
+        IReadOnlyList<byte[]> infoHashes, CancellationToken ct)
+    {
+        if (!announceUrl.StartsWith("udp://", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("not a udp tracker url", nameof(announceUrl));
+        var hostPort = announceUrl[6..].Split('/', 2)[0];
+        var colon = hostPort.LastIndexOf(':');
+        if (colon < 0) throw new InvalidDataException($"udp tracker missing port: {announceUrl}");
+        var endpoint = new IPEndPoint(IPAddress.Parse(hostPort[..colon]),
+            int.Parse(hostPort[(colon + 1)..]));
+        return await ScrapeAsync(endpoint, infoHashes, ct);
+    }
+
+    public async Task<IReadOnlyList<TrackerScrape>> ScrapeAsync(IPEndPoint tracker,
+        IReadOnlyList<byte[]> infoHashes, CancellationToken ct)
+    {
+        if (infoHashes.Count == 0 || infoHashes.Count > 74)   // BEP-15: ≤74 fits one datagram
+            throw new ArgumentException("scrape takes 1..74 info-hashes", nameof(infoHashes));
+
+        var connId = await GetConnectionIdAsync(tracker, ct);
+        try { return await ScrapeWithAsync(connId, tracker, infoHashes, ct); }
+        catch (TimeoutException)
+        {
+            lock (_lock) _connections.Remove(tracker);
+            connId = await GetConnectionIdAsync(tracker, ct);
+            return await ScrapeWithAsync(connId, tracker, infoHashes, ct);
+        }
+    }
+
+    private async Task<IReadOnlyList<TrackerScrape>> ScrapeWithAsync(long connId,
+        IPEndPoint tracker, IReadOnlyList<byte[]> infoHashes, CancellationToken ct)
+    {
+        var txn = NextTxn();
+        var packet = new byte[16 + 20 * infoHashes.Count];
+        BinaryPrimitives.WriteInt64BigEndian(packet, connId);
+        BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(8), 2);   // action 2 = scrape
+        BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(12), txn);
+        for (var i = 0; i < infoHashes.Count; i++)
+            infoHashes[i].CopyTo(packet, 16 + 20 * i);
+
+        var reply = await SendReceiveAsync(tracker, packet, 8 + 12 * infoHashes.Count, txn, ct);
+        var action = BinaryPrimitives.ReadInt32BigEndian(reply);
+        var replyTxn = BinaryPrimitives.ReadInt32BigEndian(reply.AsSpan(4));
+        if (replyTxn != txn) throw new InvalidDataException("udp tracker: txn mismatch");
+        if (action == 3)
+        {
+            var msg = Encoding.UTF8.GetString(reply, 8, Math.Max(0, reply.Length - 8)).TrimEnd('\0');
+            throw new InvalidDataException($"udp tracker scrape failed: {msg}");
+        }
+        if (action != 2) throw new InvalidDataException($"udp tracker: action {action} reply");
+
+        var result = new List<TrackerScrape>(infoHashes.Count);
+        for (var i = 0; i < infoHashes.Count; i++)
+        {
+            var off = 8 + 12 * i;
+            if (off + 12 > reply.Length) break;
+            result.Add(new TrackerScrape(
+                Seeders: (int)BinaryPrimitives.ReadUInt32BigEndian(reply.AsSpan(off)),
+                Completed: (int)BinaryPrimitives.ReadUInt32BigEndian(reply.AsSpan(off + 4)),
+                Leechers: (int)BinaryPrimitives.ReadUInt32BigEndian(reply.AsSpan(off + 8))));
+        }
+        return result;
     }
 
     private async Task<byte[]> SendReceiveAsync(IPEndPoint tracker, byte[] packet,

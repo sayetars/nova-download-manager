@@ -49,6 +49,10 @@ public sealed class AddDownloadRequest
     public string? ConvertPreset { get; set; }
     /// <summary>v1.4.0: BitTorrent — keep serving (seeding) after completion.</summary>
     public bool SeedAfter { get; set; }
+    /// <summary>v1.4.1: BitTorrent multi-file selection CSV ("0,2,5"; null/empty = all).</summary>
+    public string? SelectedFiles { get; set; }
+    /// <summary>v1.4.1: BitTorrent — super-seeding (BEP-16) for this task.</summary>
+    public bool SuperSeed { get; set; }
 }
 
 public sealed class BatchAddRequest

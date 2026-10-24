@@ -30,7 +30,10 @@ public static class TorrentTask
     {
         var meta = await ResolveMetaAsync(task, ct, settings, onProgress, staticPeers);
 
-        task.TotalBytes = meta.TotalLength;
+        // v1.4.1: partial (selected-files) torrents report selected totals, not whole-torrent
+        var selected = ParseSelectedFiles(task.SelectedFiles);
+        var partial = selected is { Count: > 0 } && !meta.IsSingleFile;
+        task.TotalBytes = partial ? meta.SelectedFileBytes(selected!) : meta.TotalLength;
         task.SegmentsTotal = meta.PieceCount;
         task.SegmentCount = meta.PieceCount;
         if (string.IsNullOrEmpty(task.FileName) || task.FileName == "download")
@@ -50,6 +53,9 @@ public static class TorrentTask
             EnableDht = settings?.Invoke("bt_dht") is { Length: > 0 } s ? s != "0" : true,
             UploadCapBytes = ParseLong(settings?.Invoke("bt_upload_cap")),
             MetadataTimeout = TimeSpan.FromSeconds(metaTimeout > 0 ? metaTimeout : 60),
+            // v1.4.1: per-file selection + BEP-16
+            SelectedFiles = ParseSelectedFiles(task.SelectedFiles),
+            SuperSeed = task.SuperSeed || settings?.Invoke("bt_superseed") == "1",
         };
         if (opt.SeedAfterComplete || listenPort > 0)
         {
@@ -66,8 +72,8 @@ public static class TorrentTask
             session.Progress += (delta, rate) => onProgress(delta, rate);
             var finalPath = await session.DownloadAsync(ct);
 
-            // resume-safe counters reflect verified pieces
-            task.ReceivedBytes = meta.TotalLength;
+            // resume-safe counters reflect verified pieces (selected totals for partial)
+            task.ReceivedBytes = task.TotalBytes;
             task.SegmentsDone = meta.PieceCount;
             return finalPath;
         }
@@ -87,6 +93,18 @@ public static class TorrentTask
 
     private static long ParseLong(string? s) =>
         long.TryParse(s, out var v) ? v : 0;
+
+    /// <summary>"0,2,5" → [0,2,5]; null/empty/whitespace = whole torrent (null).</summary>
+    public static IReadOnlyList<int>? ParseSelectedFiles(string csv)
+    {
+        if (string.IsNullOrWhiteSpace(csv)) return null;
+        var list = csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => int.TryParse(s, out var i) ? i : -1)
+            .Where(i => i >= 0)
+            .Distinct()
+            .ToList();
+        return list.Count > 0 ? list : null;
+    }
 
     private static int FindFreePort()
     {

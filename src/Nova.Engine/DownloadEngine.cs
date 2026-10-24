@@ -177,6 +177,8 @@ public sealed class DownloadEngine : IAsyncDisposable
             PieceHashes = spec.PieceHashes,
             ConvertPreset = spec.ConvertPreset ?? "",
             SeedAfter = spec.SeedAfter,
+            SelectedFiles = spec.SelectedFiles ?? "",
+            SuperSeed = spec.SuperSeed,
             State = DownloadState.Created,
         };
         task.Id = _repo.Insert(task);
@@ -590,6 +592,10 @@ public sealed record NewDownload
     public string? ConvertPreset { get; init; }
     /// <summary>v1.4.0: BitTorrent — keep serving (seeding) after completion.</summary>
     public bool SeedAfter { get; init; }
+    /// <summary>v1.4.1: BitTorrent multi-file selection CSV ("0,2,5"; null/empty = all).</summary>
+    public string? SelectedFiles { get; init; }
+    /// <summary>v1.4.1: BitTorrent — super-seeding (BEP-16) for this task.</summary>
+    public bool SuperSeed { get; init; }
 }
 
 public sealed record AddDownloadOutcome(string TaskKey, long TaskId, bool Duplicate);

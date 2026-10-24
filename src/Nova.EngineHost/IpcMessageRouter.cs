@@ -844,6 +844,8 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
         PieceHashes = r.PieceHashes,
         ConvertPreset = r.ConvertPreset,
         SeedAfter = r.SeedAfter,
+        SelectedFiles = r.SelectedFiles,
+        SuperSeed = r.SuperSeed,
     };
 
     // ---- custom categories (category_def table) ----------------------------

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Nova — assemble the Linux x64 release tarball (v1.4.0).
+# Nova — assemble the Linux x64 release tarball (v1.4.1).
 # Mirrors the v1.0.1 layout: bundle/ (flutter + FDD engine + browserhost),
 # engine-self-contained/, extensions/, docs/, launcher scripts, SHA256SUMS.
 set -euo pipefail
 ROOT=/home/z/my-project
-VER=1.4.0
+VER=1.4.1
 NAME="nova-dm-${VER}-linux-x64"
 STAGE="$ROOT/download/stage-$NAME"
 OUT="$ROOT/download/$NAME.tar.gz"

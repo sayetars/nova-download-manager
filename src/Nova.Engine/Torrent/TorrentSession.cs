@@ -24,15 +24,21 @@ public sealed class TorrentSessionOptions
     public IReadOnlyList<string> Trackers { get; set; } = Array.Empty<string>();
     /// <summary>Directly-known peers (tests, LAN seeds, PEX-learned).</summary>
     public IReadOnlyList<TorrentPeer> StaticPeers { get; set; } = Array.Empty<TorrentPeer>();
+    /// <summary>v1.4.1: file indices to download from a multi-file torrent (null/empty = all).
+    /// Unwanted pieces are never requested; completion = all wanted pieces verified.</summary>
+    public IReadOnlyList<int>? SelectedFiles { get; set; }
+    /// <summary>v1.4.1: BEP-16 super-seeding — drip pieces one per peer until confirmed.
+    /// Maximizes real availability when the swarm has several nearly-complete peers.</summary>
+    public bool SuperSeed { get; set; }
     /// <summary>Overall deadline for magnet metadata acquisition.</summary>
     public TimeSpan MetadataTimeout { get; set; } = TimeSpan.FromSeconds(45);
     public string PeerId { get; set; } = GeneratePeerId();
 
     public static string GeneratePeerId()
     {
-        // Azureus-style: -NO1400- + 12 random
+        // Azureus-style: -NO1410- + 12 random
         var suffix = Random.Shared.NextInt64().ToString("x12").PadLeft(12, '0');
-        return "-NO1400-" + suffix[..Math.Min(12, suffix.Length)];
+        return "-NO1410-" + suffix[..Math.Min(12, suffix.Length)];
     }
 }
 
@@ -59,6 +65,11 @@ public sealed class TorrentSession : IAsyncDisposable
     private readonly Dictionary<PeerWireClient, List<(int Piece, int Begin)>> _peerInFlight = new();
     private readonly List<PeerWireClient> _peers = new();
     private readonly HashSet<string> _triedPeers = new();
+    // ---- v1.4.1: PEX (BEP-11) + super-seeding (BEP-16) bookkeeping
+    private readonly Dictionary<PeerWireClient, PexPeerState> _pex = new();
+    private readonly Dictionary<PeerWireClient, SuperSeedPeerState> _superSeed = new();
+    private readonly HashSet<int> _superSeedRevealed = new();
+    private Task? _pexLoop;
     private TcpListener? _listener;
     private DhtClient? _dht;
     private long _uploaded;
@@ -116,6 +127,16 @@ public sealed class TorrentSession : IAsyncDisposable
             _pieceRemaining[i] = meta.PieceSize(i);
         RestoreBitfield();
 
+        // v1.4.1: multi-file selection → wanted-piece mask (applied before any picking)
+        var selected = _opt.SelectedFiles is { Count: > 0 } sel ? sel.ToArray() : null;
+        if (selected is not null && !meta.IsSingleFile)
+        {
+            _selectedFileIdx = new HashSet<int>(selected);
+            _picker.SetWanted(meta.PieceMaskForFiles(selected));
+            Log?.Invoke($"file selection: {_selectedFileIdx.Count}/{meta.Files.Length} files, " +
+                        $"{_picker.WantedCount}/{meta.PieceCount} pieces wanted");
+        }
+
         if (_picker.IsComplete)
         {
             Log?.Invoke($"resume: all {meta.PieceCount} pieces already verified");
@@ -131,6 +152,7 @@ public sealed class TorrentSession : IAsyncDisposable
         StartListener();
         if (_opt.EnableDht) _ = RunDhtAsync(_cts.Token);
         ConnectStaticPeers();
+        StartPexLoop();
 
         // main supervisory loop
         try
@@ -211,11 +233,14 @@ public sealed class TorrentSession : IAsyncDisposable
 
     private async Task SplitMultiFileAsync(TorrentMeta meta, CancellationToken ct)
     {
-        // contiguous temp → per-file paths
+        // contiguous temp → per-file paths (v1.4.1: only selected files are extracted;
+        // skipped files share no wanted pieces with selected ones at their interior)
         await using var src = new FileStream(TempPath, FileMode.Open, FileAccess.Read, FileShare.Read,
             1 << 16, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        foreach (var f in meta.Files)
+        for (var i = 0; i < meta.Files.Length; i++)
         {
+            if (_selectedFileIdx is { Count: > 0 } && !_selectedFileIdx.Contains(i)) continue;
+            var f = meta.Files[i];
             var target = string.IsNullOrEmpty(f.SubPath)
                 ? Path.Combine(FinalPath, meta.Name)
                 : Path.Combine(FinalPath, f.SubPath);
@@ -411,6 +436,7 @@ public sealed class TorrentSession : IAsyncDisposable
         StartListener();
         if (_opt.EnableDht) _ = RunDhtAsync(_cts.Token);
         ConnectStaticPeers();
+        StartPexLoop();
         try
         {
             await Task.Delay(Timeout.Infinite, _cts.Token);
@@ -521,6 +547,8 @@ public sealed class TorrentSession : IAsyncDisposable
             removed = _peers.Remove(wire);
             if (removed && wire.PeerBitfield is not null) _picker?.RemoveAvailability(wire.PeerBitfield);
         }
+        lock (_pex) _pex.Remove(wire);               // v1.4.1: stop PEX-ing to a dead peer
+        lock (_superSeed) _superSeed.Remove(wire);   // v1.4.1: release its drip state
         // release anything this peer had in flight so others can retry
         if (removed)
         {
@@ -567,20 +595,38 @@ public sealed class TorrentSession : IAsyncDisposable
             if (_peers.Count >= _opt.MaxPeers + 4) return;
             _peers.Add(wire);
         }
+        lock (_pex)
+        {
+            // v1.4.1: register for PEX; queue our other connected peers for the first diff
+            var state = new PexPeerState();
+            foreach (var other in _peers.Where(p => !ReferenceEquals(p, wire)))
+            {
+                var ep = ParseEndpoint(other.Address);
+                if (ep is { } peer && peer.Port > 0)
+                    state.Pending[PexMessage.KeyOf(peer)] = peer;
+            }
+            _pex[wire] = state;
+        }
         PeerCount = _peers.Count;
         PeerCountChanged?.Invoke(PeerCount);
 
         // announce what we have, declare interest when incomplete
         var ourBits = _picker!.Snapshot();
-        await wire.SendBitfieldAsync(ourBits, ct);
-        if (Completed || _picker.IsComplete)
+        var seedingNow = Completed || _picker.IsComplete;
+        if (!seedingNow || !_opt.SuperSeed)
+            await wire.SendBitfieldAsync(ourBits, ct);
+        // BEP-16: in super-seed mode we deliberately send NO bitfield —
+        // pieces are dripped one HAVE at a time by AssignSuperSeedPiece.
+        if (seedingNow)
             await wire.SendNotInterestedAsync(ct);
         else
             await wire.SendInterestedAsync(ct);
 
-        if (Completed || _picker.IsComplete)
+        if (seedingNow)
         {
             await wire.SendUnchokeAsync(ct);   // seed mode: unchoke everyone
+            if (_opt.SuperSeed)
+                await AssignSuperSeedPieceAsync(wire, ct);
             await SeedLoopAsync(wire, ct);
             return;
         }
@@ -660,6 +706,7 @@ public sealed class TorrentSession : IAsyncDisposable
                         break;
                     case PeerWireClient.MsgExtended:
                         await TryServeUtMetadataAsync(wire, msg.Value, ct);
+                        await TryHandlePexAsync(wire, msg.Value, ct);
                         break;
                     case 255: // keepalive
                         break;
@@ -678,6 +725,7 @@ public sealed class TorrentSession : IAsyncDisposable
     {
         var channel = System.Threading.Channels.Channel.CreateUnbounded<PeerWireClient.PeerMessage?>();
         var reader = Task.Run(() => ReadIntoChannelAsync(wire, channel, ct), ct);
+        var superSeed = _opt.SuperSeed && _superSeed.ContainsKey(wire);
         try
         {
             while (!ct.IsCancellationRequested)
@@ -690,10 +738,23 @@ public sealed class TorrentSession : IAsyncDisposable
                 }
                 catch (OperationCanceledException) { break; }
                 if (msg is null) break;
-                if (msg.Value.Id == PeerWireClient.MsgRequest)
-                    await ServeRequestAsync(wire, msg.Value, ct);
-                else if (msg.Value.Id == PeerWireClient.MsgExtended)
-                    await TryServeUtMetadataAsync(wire, msg.Value, ct);
+                switch (msg.Value.Id)
+                {
+                    case PeerWireClient.MsgRequest:
+                        await ServeRequestAsync(wire, msg.Value, ct);
+                        break;
+                    case PeerWireClient.MsgExtended:
+                        await TryServeUtMetadataAsync(wire, msg.Value, ct);
+                        await TryHandlePexAsync(wire, msg.Value, ct);
+                        break;
+                    case PeerWireClient.MsgHave when superSeed:
+                        // BEP-16: the peer just completed the piece we dripped to it —
+                        // reveal that piece to the rest of the swarm and drip the next one
+                        if (msg.Value.Payload.Length >= 4)
+                            await RevealSuperSeedPieceAsync(wire,
+                                BinaryPrimitives.ReadInt32BigEndian(msg.Value.Payload), ct);
+                        break;
+                }
             }
         }
         finally
@@ -722,6 +783,154 @@ public sealed class TorrentSession : IAsyncDisposable
         catch (InvalidDataException) { /* junk request */ }
     }
 
+    // ================================================================= PEX (BEP-11, v1.4.1)
+    /// <summary>"host:port" → TorrentPeer (null when not parseable IPv4).</summary>
+    private static TorrentPeer? ParseEndpoint(string address)
+    {
+        var colon = address.LastIndexOf(':');
+        if (colon <= 0 || colon == address.Length - 1) return null;
+        if (!IPAddress.TryParse(address[..colon], out var ip)) return null;
+        if (!int.TryParse(address[(colon + 1)..], out var port)) return null;
+        return port <= 0 ? null : new TorrentPeer(ip, port);
+    }
+
+    private void StartPexLoop()
+    {
+        if (_pexLoop is not null) return;
+        _pexLoop = Task.Run(async () =>
+        {
+            // BEP-11 etiquette: PEX at most every ~60s. 30s keeps tests snappy
+            // while staying under most clients' rate limits.
+            while (!_cts!.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(30_000, _cts.Token);
+                    await BroadcastPexAsync(_cts.Token);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception) { /* transient socket error — next tick */ }
+            }
+        }, _cts!.Token);
+    }
+
+    /// <summary>Sends per-peer PEX diffs: added = connected peers they don't know yet,
+    /// dropped = previously sent peers now gone. PEX messages are never sent to peers
+    /// we learned them FROM (loop avoidance is via per-peer sent-sets + we only announce
+    /// peers we are DIRECTLY connected to — standard client practice).</summary>
+    internal async Task BroadcastPexAsync(CancellationToken ct)
+    {
+        List<PeerWireClient> peers;
+        lock (_peers) peers = _peers.Where(p => p.UtPexId > 0).ToList();
+        foreach (var peer in peers)
+        {
+            List<PexMessage.PexPeer> added = new();
+            List<TorrentPeer> dropped = new();
+            lock (_pex)
+            {
+                if (!_pex.TryGetValue(peer, out var state)) continue;
+                // current connected endpoints (as compact keys)
+                var current = new Dictionary<string, TorrentPeer>();
+                foreach (var other in _peers)
+                {
+                    if (ReferenceEquals(other, peer)) continue;
+                    var ep = ParseEndpoint(other.Address);
+                    if (ep is { } p && p.Port > 0) current[PexMessage.KeyOf(p)] = p;
+                }
+                foreach (var kv in state.Pending)
+                    if (current.ContainsKey(kv.Key) && state.Sent.Add(kv.Key))
+                        added.Add(new PexMessage.PexPeer(kv.Value, 0));
+                foreach (var key in state.Sent)
+                    if (!current.ContainsKey(key))
+                        dropped.Add(current.TryGetValue(key, out var p) ? p :
+                            ParseEndpoint(key) ?? default);
+                state.Sent.RemoveWhere(k => !current.ContainsKey(k));
+                state.Pending.Clear();
+                foreach (var kv in current)
+                    if (!state.Sent.Contains(kv.Key)) state.Pending[kv.Key] = kv.Value;
+            }
+            if (added.Count == 0 && dropped.Count == 0) continue;
+            try
+            {
+                await peer.SendMessageInternalAsync(PeerWireClient.MsgExtended, peer.UtPexId,
+                    PexMessage.Encode(added, dropped), ct);
+            }
+            catch (Exception) { /* peer gone — RemovePeer cleans up */ }
+        }
+    }
+
+    /// <summary>Handles an inbound ut_pex message: new peers go into the discovery queue
+    /// (deduped, capped). Malformed payloads are ignored per the BEP.</summary>
+    private async Task TryHandlePexAsync(PeerWireClient wire, PeerWireClient.PeerMessage msg,
+        CancellationToken ct)
+    {
+        if (msg.ExtendedId == 0 || wire.UtPexId == 0 || msg.ExtendedId != wire.UtPexId) return;
+        var (added, _) = PexMessage.Decode(msg.Payload);
+        if (added.Count == 0) return;
+        lock (_discovered)
+        {
+            foreach (var p in added)
+                if (p.Peer.Port > 0)
+                    _discovered.Enqueue(p.Peer);
+        }
+        Log?.Invoke($"pex: +{added.Count} peer(s) from {wire.Address}");
+        MaintainPeerCount();
+        await Task.CompletedTask;
+    }
+
+    // ================================================================= super-seeding (BEP-16, v1.4.1)
+    /// <summary>Picks the next piece to drip to a peer (BEP-16): prefer pieces nobody has
+    /// been told about yet; never hand the same unrevealed piece to two peers.</summary>
+    private async Task AssignSuperSeedPieceAsync(PeerWireClient wire, CancellationToken ct)
+    {
+        var meta = Meta!;
+        SuperSeedPeerState state;
+        lock (_superSeed)
+        {
+            if (!_superSeed.TryGetValue(wire, out state!))
+                _superSeed[wire] = state = new SuperSeedPeerState();
+        }
+
+        int pick = -1;
+        lock (_superSeedRevealed)
+        {
+            for (var i = 0; i < meta.PieceCount; i++)
+                if (!_superSeedRevealed.Contains(i)) { pick = i; break; }
+        }
+        if (pick < 0)
+        {
+            // every piece revealed at least once → fall back to round-robin over all pieces
+            pick = state.RoundRobin++ % meta.PieceCount;
+        }
+        state.CurrentPiece = pick;
+        state.AssignedAt = DateTime.UtcNow;
+        Log?.Invoke($"super-seed: drip piece {pick} → {wire.Address}");
+        await wire.SendHaveAsync(pick, ct);
+    }
+
+    /// <summary>Peer confirmed it finished the dripped piece → reveal it swarm-wide and
+    /// assign the next piece to this peer.</summary>
+    private async Task RevealSuperSeedPieceAsync(PeerWireClient wire, int piece, CancellationToken ct)
+    {
+        if (piece < 0 || piece >= Meta!.PieceCount) return;
+        lock (_superSeed)
+        {
+            if (!_superSeed.TryGetValue(wire, out var st) || st.CurrentPiece != piece) return;
+            st.CurrentPiece = -1;
+        }
+        bool firstReveal;
+        lock (_superSeedRevealed) firstReveal = _superSeedRevealed.Add(piece);
+        if (firstReveal)
+        {
+            List<PeerWireClient> others;
+            lock (_peers) others = _peers.Where(p => !ReferenceEquals(p, wire)).ToList();
+            foreach (var other in others)
+                try { await other.SendHaveAsync(piece, ct); } catch { /* peer gone */ }
+        }
+        await AssignSuperSeedPieceAsync(wire, ct);
+    }
+
+    // ================================================================= serving
     private async Task ServeRequestAsync(PeerWireClient wire, PeerWireClient.PeerMessage msg,
         CancellationToken ct)
     {
@@ -889,6 +1098,8 @@ public sealed class TorrentSession : IAsyncDisposable
     }
 
     private readonly Queue<TorrentPeer> _discovered = new();
+    /// <summary>v1.4.1: selected file indices (null = whole torrent).</summary>
+    private HashSet<int>? _selectedFileIdx;
 
     private List<TorrentPeer> DrainDiscoveredPeers(int max)
     {
@@ -979,10 +1190,24 @@ public sealed class TorrentSession : IAsyncDisposable
         {
             _dht = new DhtClient();
             await _dht.BootstrapAsync(Array.Empty<IPEndPoint>(), ct);
-            var peers = await _dht.GetPeersAsync(_infoHash, 16, ct);
-            lock (_discovered)
-                foreach (var p in peers) _discovered.Enqueue(p);
-            MaintainPeerCount();
+            // v1.4.1: DHT is now a LIFELONG discovery + announce loop (was: one-shot).
+            // Each pass: find peers for our info-hash, queue them, then announce_peer
+            // so the swarm can find US. Interval 90s ≈ BEP-5 hygiene.
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    var peers = await _dht.GetPeersAsync(_infoHash, 16, ct);
+                    lock (_discovered)
+                        foreach (var p in peers) _discovered.Enqueue(p);
+                    MaintainPeerCount();
+                    if (_announcePort > 0)
+                        await _dht.AnnounceAsync(_infoHash, _announcePort, ct);
+                }
+                catch (Exception) when (!ct.IsCancellationRequested) { /* transient */ }
+                try { await Task.Delay(90_000, ct); }
+                catch (OperationCanceledException) { break; }
+            }
         }
         catch (Exception) when (ct.IsCancellationRequested is false) { /* DHT unavailable */ }
     }
@@ -1005,6 +1230,42 @@ public sealed class TorrentSession : IAsyncDisposable
             lock (_pieceRemaining!)
                 for (var i = 0; i < count; i++)
                     if (bits[i]) _pieceRemaining[i] = 0;
+
+            // v1.4.1: optional wanted mask appended after the have-bitmap — a resumed
+            // task keeps its file selection across engine restarts
+            var bfBytes = (count + 7) / 8;
+            if (raw.Length >= 4 + bfBytes * 2 + 4)
+            {
+                var wCount = BinaryPrimitives.ReadInt32BigEndian(raw.AsSpan(4 + bfBytes));
+                if (wCount == count)
+                {
+                    var wanted = new bool[count];
+                    for (var i = 0; i < count && (4 + bfBytes + 4 + i / 8) < raw.Length; i++)
+                        wanted[i] = (raw[4 + bfBytes + 4 + i / 8] & (0x80 >> (i % 8))) != 0;
+                    if (wanted.Any(w => !w))
+                    {
+                        _picker.SetWanted(wanted);
+                        // derive the file selection back from the mask (file = wanted iff
+                        // every piece overlapping it is wanted) so the split step knows
+                        // which files to extract after resume
+                        if (!meta.IsSingleFile)
+                        {
+                            _selectedFileIdx = new HashSet<int>();
+                            for (var f = 0; f < meta.Files.Length; f++)
+                            {
+                                var fi = meta.Files[f];
+                                var first = (int)(fi.Offset / meta.PieceLength);
+                                var last = (int)((fi.Offset + fi.Length - 1) / meta.PieceLength);
+                                var allWanted = true;
+                                for (var p = first; p <= Math.Min(last, meta.PieceCount - 1); p++)
+                                    if (!wanted[p]) { allWanted = false; break; }
+                                if (allWanted) _selectedFileIdx.Add(f);
+                            }
+                        }
+                        Log?.Invoke($"resume: {_picker.WantedCount}/{count} pieces wanted (file selection restored)");
+                    }
+                }
+            }
             Log?.Invoke($"resume: {bits.Count(b => b)}/{count} pieces verified");
         }
         catch (Exception) { /* corrupt sidecar → fresh */ }
@@ -1021,10 +1282,19 @@ public sealed class TorrentSession : IAsyncDisposable
         try
         {
             var bits = _picker.Snapshot();
-            var raw = new byte[4 + (bits.Length + 7) / 8];
+            var bfBytes = (bits.Length + 7) / 8;
+            var hasMask = _picker.Wanted is not null && _picker.WantedCount < bits.Length;
+            var raw = new byte[4 + bfBytes + (hasMask ? 4 + bfBytes : 0)];
             BinaryPrimitives.WriteInt32BigEndian(raw, bits.Length);
             for (var i = 0; i < bits.Length; i++)
                 if (bits[i]) raw[4 + i / 8] |= (byte)(0x80 >> (i % 8));
+            if (hasMask)
+            {
+                var mask = _picker.Wanted!;
+                BinaryPrimitives.WriteInt32BigEndian(raw.AsSpan(4 + bfBytes), bits.Length);
+                for (var i = 0; i < bits.Length; i++)
+                    if (mask[i]) raw[4 + bfBytes + 4 + i / 8] |= (byte)(0x80 >> (i % 8));
+            }
             File.WriteAllBytes(_bitfieldSidecarPath!, raw);
         }
         catch (Exception) { /* disk hiccup — retried on next piece */ }
@@ -1042,4 +1312,14 @@ public sealed class TorrentSession : IAsyncDisposable
         _data = null;
         SaveBitfield();
     }
+}
+
+/// <summary>BEP-16 per-peer state: which piece the peer is currently “dripped”, the
+/// round-robin cursor for the exhausted-reveal fallback, and when it was assigned
+/// (peers that never confirm can be re-dripped by the periodic prune).</summary>
+public sealed class SuperSeedPeerState
+{
+    public int CurrentPiece { get; set; } = -1;
+    public int RoundRobin { get; set; }
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
 }

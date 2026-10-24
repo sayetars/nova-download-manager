@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/models.dart';
 import '../core/strings.dart';
 import '../core/theme.dart';
+import '../core/torrent_meta.dart';
 import '../providers/engine.dart' as prov;
 import 'task_properties.dart';
 
@@ -470,7 +471,21 @@ Future<void> showAddDownloadDialog(BuildContext context,
   var downloadLater = false;
   var sequential = false;
   var seedAfter = false;
+  var superSeed = false;
   List<String>? previewUrls;
+  // v1.4.1: local .torrent file → per-file selection checkboxes
+  TorrentPreview? torrentPreview;
+  Set<int> deselectedFiles = {};   // indices the user unticked
+
+  void refreshPreview(String text) {
+    final t = text.trim();
+    torrentPreview = (t.endsWith('.torrent') && io.File(t).existsSync())
+        ? tryParseTorrent(t)
+        : null;
+    deselectedFiles = {};
+    superSeed = false;
+    seedAfter = false;
+  }
 
   await showDialog(
     context: context,
@@ -494,7 +509,10 @@ Future<void> showAddDownloadDialog(BuildContext context,
                     hintText: s.urlHint,
                     helperText: s.batchHint,
                   ),
-                  onChanged: (v) => setState(() => previewUrls = null),
+                  onChanged: (v) => setState(() {
+                        previewUrls = null;
+                        refreshPreview(v);   // v1.4.1: .torrent file listing
+                      }),
                 ),
                 if (urlCtrl.text.trim().startsWith('magnet:'))
                   Padding(
@@ -619,7 +637,8 @@ Future<void> showAddDownloadDialog(BuildContext context,
                       value: sequential,
                       onChanged: (v) => setState(() => sequential = v),
                     ),
-                    if (urlCtrl.text.trim().startsWith('magnet:'))
+                    if (urlCtrl.text.trim().startsWith('magnet:') ||
+                        (urlCtrl.text.trim().endsWith('.torrent') && io.File(urlCtrl.text.trim()).existsSync()))
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
                         dense: true,
@@ -629,6 +648,52 @@ Future<void> showAddDownloadDialog(BuildContext context,
                         value: seedAfter,
                         onChanged: (v) => setState(() => seedAfter = v),
                       ),
+                    if (seedAfter)
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: Text(s.superSeedTorrent),
+                        subtitle: Text(s.superSeedTorrentHint,
+                            style: Theme.of(context).textTheme.bodySmall),
+                        value: superSeed,
+                        onChanged: (v) => setState(() => superSeed = v),
+                      ),
+                    // v1.4.1: multi-file selection for a local .torrent
+                    if (torrentPreview != null && !torrentPreview!.isSingleFile) ...[
+                      const SizedBox(height: 8),
+                      Text(s.torrentFiles, style: Theme.of(context).textTheme.titleSmall),
+                      Text(s.torrentFilesHint, style: Theme.of(context).textTheme.bodySmall),
+                      const SizedBox(height: 4),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 180),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            children: [
+                              for (var i = 0; i < torrentPreview!.files.length; i++)
+                                CheckboxListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  controlAffinity: ListTileControlAffinity.leading,
+                                  title: Text(torrentPreview!.files[i].subPath,
+                                      overflow: TextOverflow.ellipsis),
+                                  subtitle: Text(
+                                      '${(torrentPreview!.files[i].length / 1048576).toStringAsFixed(2)} MB',
+                                      style: Theme.of(context).textTheme.bodySmall),
+                                  value: !deselectedFiles.contains(i),
+                                  onChanged: (v) => setState(() {
+                                        if (v == true) {
+                                          deselectedFiles.remove(i);
+                                        } else {
+                                          deselectedFiles.add(i);
+                                        }
+                                      })),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (deselectedFiles.isEmpty)
+                        Text(s.torrentFilesAll, style: Theme.of(context).textTheme.bodySmall),
+                    ],
                   ],
                 ),
               ],
@@ -697,7 +762,17 @@ Future<void> showAddDownloadDialog(BuildContext context,
           extraHeaders: headersCtrl.text.trim(),
           expectedHash: hashCtrl.text.trim(),
           sequential: sequential,
-          seedAfter: seedAfter && valid.first.startsWith('magnet:'),
+          seedAfter: seedAfter &&
+              (valid.first.startsWith('magnet:') || valid.first.endsWith('.torrent')),
+          superSeed: superSeed,
+          selectedFiles: (torrentPreview != null &&
+                  !torrentPreview!.isSingleFile &&
+                  deselectedFiles.isNotEmpty &&
+                  deselectedFiles.length < torrentPreview!.files.length)
+              ? [for (var i = 0; i < torrentPreview!.files.length; i++)
+                  if (!deselectedFiles.contains(i)) i.toString()]
+                  .join(',')
+              : null,
         );
       } else {
         await notifier.addBatch(valid,
