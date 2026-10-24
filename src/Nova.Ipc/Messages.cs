@@ -293,6 +293,75 @@ public sealed class ImportIdmRequest
     public bool AutoStart { get; set; }
 }
 
+// ---- v1.5.0 G-track ---------------------------------------------------------
+
+/// <summary>G28: ask the engine whether a yt-dlp binary is available and usable.</summary>
+public sealed class YtDlpStatusRequest { }
+
+/// <summary>G28: analyze a page URL into a format list (quality panel).</summary>
+public sealed class YtDlpAnalyzeRequest
+{
+    public string Url { get; set; } = string.Empty;
+}
+
+/// <summary>G28: resolve a chosen format and create a normal engine download task.</summary>
+public sealed class YtDlpDownloadRequest
+{
+    public string Url { get; set; } = string.Empty;
+    public string FormatId { get; set; } = string.Empty;
+    public string? DestinationDir { get; set; }
+    public string? FileName { get; set; }
+    public string? Referer { get; set; }
+    public string? Cookies { get; set; }
+    /// <summary>Title from the analyze step (used to name progressive formats).</summary>
+    public string? Title { get; set; }
+    /// <summary>Extension from the analyze step (used when the URL has none).</summary>
+    public string? Ext { get; set; }
+    public bool AutoStart { get; set; } = true;
+}
+
+/// <summary>G17: start (lazily) the preview server and get the URL for one task.</summary>
+public sealed class PreviewStartRequest
+{
+    public string TaskKey { get; set; } = string.Empty;
+}
+
+public sealed class PreviewStopRequest { }
+
+/// <summary>G25: save/replace one client-certificate binding.</summary>
+public sealed class SaveClientCertRequest
+{
+    public string HostPattern { get; set; } = string.Empty;
+    /// <summary>pfx | pem | store</summary>
+    public string Source { get; set; } = "pfx";
+    public string CertPath { get; set; } = "";
+    public string KeyPath { get; set; } = "";
+    public string StoreName { get; set; } = "My";
+    public string Thumbprint { get; set; } = "";
+    /// <summary>PFX passphrase — stored server-side only, never echoed back.</summary>
+    public string Passphrase { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+}
+
+public sealed class DeleteClientCertRequest
+{
+    public long Id { get; set; }
+}
+
+/// <summary>G26: import an armored PGP public key into the keyring.</summary>
+public sealed class SavePgpKeyRequest
+{
+    public string Label { get; set; } = string.Empty;
+    public string ArmoredKey { get; set; } = string.Empty;
+}
+
+public sealed class DeletePgpKeyRequest
+{
+    public long Id { get; set; }
+}
+
+public sealed class ResetServerProfilesRequest { }
+
 public sealed class SaveScheduleRequest
 {
     public long? Id { get; set; }
@@ -306,7 +375,7 @@ public sealed class SaveScheduleRequest
 
 public sealed class EngineStatusResponse
 {
-    public string EngineVersion { get; set; } = "1.3.0";
+    public string EngineVersion { get; set; } = "1.5.0";
     public int ActiveTasks { get; set; }
     public int QueuedTasks { get; set; }
     public long GlobalSpeed { get; set; }

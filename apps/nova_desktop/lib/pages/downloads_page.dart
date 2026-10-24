@@ -10,6 +10,7 @@ import '../core/strings.dart';
 import '../core/theme.dart';
 import '../core/torrent_meta.dart';
 import '../providers/engine.dart' as prov;
+import 'preview_page.dart';
 import 'task_properties.dart';
 
 /// The download list — reused across every filter (all/active/queued/…/media).
@@ -356,6 +357,19 @@ class TaskTile extends ConsumerWidget {
             onTap: () => engine?.call('open_folder', {'task_key': task.taskKey}),
           ),
         ],
+        // v1.5.0 (G17): partial preview for media tasks (growing .novadl file)
+        if (task.isPreviewable &&
+            (task.state == 'downloading' ||
+                task.state == 'paused' ||
+                task.state == 'completed' ||
+                task.state == 'interrupted'))
+          PopupMenuItem(
+            child: Text(s.previewTitle),
+            onTap: () {
+              Future<void>.delayed(Duration.zero)
+                  .then((_) => showPreviewDialog(context, task));
+            },
+          ),
         if (task.isRunning)
           PopupMenuItem(child: Text(s.pause), onTap: () => tasks.pause(task.taskKey)),
         if (task.state == 'paused' || task.state == 'interrupted')
@@ -473,6 +487,11 @@ Future<void> showAddDownloadDialog(BuildContext context,
   var seedAfter = false;
   var superSeed = false;
   List<String>? previewUrls;
+  // v1.5.0 (G28): yt-dlp analysis → quality panel
+  Map<String, dynamic>? ytdlpInfo;
+  String? ytdlpFormatId;
+  bool ytdlpBusy = false;
+  String? ytdlpError;
   // v1.4.1: local .torrent file → per-file selection checkboxes
   TorrentPreview? torrentPreview;
   Set<int> deselectedFiles = {};   // indices the user unticked
@@ -528,6 +547,110 @@ Future<void> showAddDownloadDialog(BuildContext context,
                       ],
                     ),
                   ),
+                // v1.5.0 (G28): yt-dlp analyze + quality panel for page URLs
+                if (RegExp(r'^https?://\S+$').hasMatch(urlCtrl.text.trim()) &&
+                    torrentPreview == null) ...[
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.query_stats_rounded, size: 16),
+                      label: Text(ytdlpBusy ? s.ytdlpAnalyzing : s.ytdlpAnalyze),
+                      onPressed: ytdlpBusy
+                          ? null
+                          : () async {
+                              final container = ProviderScope.containerOf(context,
+                                  listen: false);
+                              setState(() {
+                                ytdlpBusy = true;
+                                ytdlpError = null;
+                                ytdlpInfo = null;
+                                ytdlpFormatId = null;
+                              });
+                              try {
+                                final info = await container
+                                    .read(prov.tasksProvider.notifier)
+                                    .ytdlpAnalyze(urlCtrl.text.trim());
+                                if (!context.mounted) return;
+                                setState(() {
+                                  ytdlpInfo = info;
+                                  // preselect the best direct format
+                                  final formats = ((info?['formats'] as List?) ?? [])
+                                      .map((e) => Map<String, dynamic>.from(e as Map))
+                                      .where((f) => f['direct'] == true)
+                                      .toList();
+                                  ytdlpFormatId = formats.isNotEmpty
+                                      ? formats.first['format_id'] as String?
+                                      : null;
+                                });
+                              } catch (e) {
+                                if (!context.mounted) return;
+                                setState(() => ytdlpError = e.toString());
+                              } finally {
+                                if (context.mounted) setState(() => ytdlpBusy = false);
+                              }
+                            },
+                    ),
+                  ),
+                  if (ytdlpError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        ytdlpError!.contains('ytdlp_missing')
+                            ? s.ytdlpNoBinary
+                            : ytdlpError!.contains('live_stream')
+                                ? s.ytdlpLive
+                                : ytdlpError!.contains('drm_protected')
+                                    ? s.ytdlpDrm
+                                    : s.ytdlpFailed,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.error),
+                      ),
+                    ),
+                  if (ytdlpInfo != null) ...[
+                    const SizedBox(height: 6),
+                    Text('${s.ytdlpPick} — ${ytdlpInfo!['title'] ?? ''}',
+                        style: Theme.of(context).textTheme.titleSmall,
+                        overflow: TextOverflow.ellipsis),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 190),
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final f in ((ytdlpInfo!['formats'] as List?) ?? [])
+                              .map((e) => Map<String, dynamic>.from(e as Map)))
+                            RadioListTile<String>(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              value: f['format_id'] as String? ?? '',
+                              groupValue: ytdlpFormatId,
+                              onChanged: f['direct'] == true
+                                  ? (v) => setState(() => ytdlpFormatId = v)
+                                  : null,
+                              title: Text(
+                                [
+                                  f['resolution'] ?? '',
+                                  f['ext'] ?? '',
+                                  if (f['filesize'] != null && (f['filesize'] as int) > 0)
+                                    '${((f['filesize'] as int) / 1048576).toStringAsFixed(1)} MB',
+                                  if (f['note'] != null) f['note'].toString(),
+                                ]
+                                    .where((e) => e.toString().isNotEmpty)
+                                    .join(' · '),
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                              subtitle: Text(
+                                '${f['format_id']} · ${f['protocol'] ?? ''}'
+                                '${f['direct'] == true ? '' : '  (${s.ytdlpNeedsMerge})'}',
+                                style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
                 if (urlCtrl.text.contains('[') && previewUrls == null)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
@@ -711,6 +834,51 @@ Future<void> showAddDownloadDialog(BuildContext context,
       ),
     ),
   ).then((ok) async {
+    try {
+      await _handleAddOk(ok, context, urlCtrl, fileCtrl, mirrorsCtrl, startAtCtrl,
+          cookiesCtrl, headersCtrl, hashCtrl, connections, downloadLater,
+          sequential, seedAfter, superSeed, torrentPreview, deselectedFiles,
+          ytdlpInfo, ytdlpFormatId);
+    } finally {
+      urlCtrl.dispose();
+      fileCtrl.dispose();
+      mirrorsCtrl.dispose();
+      startAtCtrl.dispose();
+      cookiesCtrl.dispose();
+      headersCtrl.dispose();
+      hashCtrl.dispose();
+    }
+  });
+}
+
+/// Extracts the extension of the picked yt-dlp format (title-based naming).
+String? _extOf(Map<String, dynamic>? info, String? formatId) {
+  if (info == null || formatId == null) return null;
+  for (final f in (info['formats'] as List? ?? [])) {
+    if ((f as Map)['format_id'] == formatId) return f['ext'] as String?;
+  }
+  return null;
+}
+
+Future<void> _handleAddOk(
+    bool ok,
+    BuildContext context,
+    TextEditingController urlCtrl,
+    TextEditingController fileCtrl,
+    TextEditingController mirrorsCtrl,
+    TextEditingController startAtCtrl,
+    TextEditingController cookiesCtrl,
+    TextEditingController headersCtrl,
+    TextEditingController hashCtrl,
+    int connections,
+    bool downloadLater,
+    bool sequential,
+    bool seedAfter,
+    bool superSeed,
+    TorrentPreview? torrentPreview,
+    Set<int> deselectedFiles,
+    Map<String, dynamic>? ytdlpInfo,
+    String? ytdlpFormatId) async {
     if (ok == true && context.mounted) {
       final notifier = ProviderScope.containerOf(context, listen: false)
           .read(prov.tasksProvider.notifier);
@@ -723,6 +891,31 @@ Future<void> showAddDownloadDialog(BuildContext context,
       if (urls.length == 1 && urls.first.contains(' ')) {
         urls = urls.first.split(RegExp(r'\s+')).where((u) => u.isNotEmpty).toList();
       }
+
+      // v1.5.0 (G28): yt-dlp quality was picked → resolve through the bridge
+      if (ytdlpFormatId != null && urls.length == 1) {
+        try {
+          await notifier.ytdlpDownload(
+            url: urls.first,
+            formatId: ytdlpFormatId!,
+            fileName: fileCtrl.text.trim().isEmpty ? null : fileCtrl.text.trim(),
+            destinationDir: null,
+            title: ytdlpInfo?['title'] as String?,
+            ext: _extOf(ytdlpInfo, ytdlpFormatId),
+          );
+          if (context.mounted) {
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text(S.of(context).added)));
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+                '${S.of(context).ytdlpSection}: $e')));
+          }
+        }
+        return;
+      }
+
       final valid = urls
           .where((u) =>
               u.startsWith('http://') ||
@@ -784,14 +977,6 @@ Future<void> showAddDownloadDialog(BuildContext context,
             .showSnackBar(SnackBar(content: Text(S.of(context).added)));
       }
     }
-    urlCtrl.dispose();
-    fileCtrl.dispose();
-    mirrorsCtrl.dispose();
-    startAtCtrl.dispose();
-    cookiesCtrl.dispose();
-    headersCtrl.dispose();
-    hashCtrl.dispose();
-  });
 }
 
 /// Full task details sheet with live per-segment bars + speed graph (IDM parity).

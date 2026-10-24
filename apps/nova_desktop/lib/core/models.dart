@@ -61,6 +61,8 @@ class TaskUi {
     this.seedAfter = false,
     this.selectedFiles,
     this.superSeed = false,
+    this.pgpStatus = 'none',
+    this.hasPgpSignature = false,
   });
 
   /// BitTorrent info-hash (v1.4.0) — null for non-torrent tasks.
@@ -71,6 +73,15 @@ class TaskUi {
   final String? selectedFiles;
   /// BitTorrent: super-seeding (BEP-16) enabled (v1.4.1).
   final bool superSeed;
+  /// PGP verification outcome: none|pending|verified|failed|nokey|error (v1.5.0).
+  final String pgpStatus;
+  /// True when a PGP signature payload was captured for this task (v1.5.0).
+  final bool hasPgpSignature;
+
+  /// v1.5.0 (G17): this task can be previewed while incomplete (media category
+  /// with enough data on disk, or already completed).
+  bool get isPreviewable =>
+      (category == 'video' || category == 'audio' || kind == 'hls' || kind == 'dash');
 
   bool get isTorrent => kind == 'torrent';
 
@@ -113,6 +124,8 @@ class TaskUi {
         seedAfter: (j['seed_after'] ?? false) as bool,
         selectedFiles: j['selected_files'] as String?,
         superSeed: (j['super_seed'] ?? false) as bool,
+        pgpStatus: (j['pgp_status'] ?? 'none') as String,
+        hasPgpSignature: (j['has_pgp_signature'] ?? false) as bool,
       );
 
   TaskUi withProgress(Map<String, dynamic> p) => TaskUi(
@@ -145,6 +158,8 @@ class TaskUi {
         seedAfter: seedAfter,
         selectedFiles: selectedFiles,
         superSeed: superSeed,
+        pgpStatus: pgpStatus,
+        hasPgpSignature: hasPgpSignature,
       );
 }
 

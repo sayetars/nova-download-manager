@@ -49,6 +49,7 @@ public sealed class NovaDatabase : IAsyncDisposable
         if (SchemaVersion < 7) { RunMigration(7, Sql.Migration7); SchemaVersion = 7; }
         if (SchemaVersion < 8) { RunMigration(8, Sql.Migration8); SchemaVersion = 8; }
         if (SchemaVersion < 9) { RunMigration(9, Sql.Migration9); SchemaVersion = 9; }
+        if (SchemaVersion < 10) { RunMigration(10, Sql.Migration10); SchemaVersion = 10; }
     }
 
     private void RunMigration(int version, string sql)
@@ -301,6 +302,43 @@ internal static class Sql
     public const string Migration9 = """
         ALTER TABLE download_task ADD COLUMN selected_files TEXT NOT NULL DEFAULT '';
         ALTER TABLE download_task ADD COLUMN super_seed INTEGER NOT NULL DEFAULT 0;
+        """;
+
+    /// <summary>v1.5.0 G-track: per-server performance profiles, TLS client-certificate
+    /// bindings, PGP keyring and per-task PGP signature/status columns.</summary>
+    public const string Migration10 = """
+        ALTER TABLE download_task ADD COLUMN pgp_signature TEXT NOT NULL DEFAULT '';
+        ALTER TABLE download_task ADD COLUMN pgp_status INTEGER NOT NULL DEFAULT 0;
+        CREATE TABLE IF NOT EXISTS server_profile (
+            host TEXT PRIMARY KEY,
+            ewma_bps INTEGER NOT NULL DEFAULT 0,
+            ewma_ttfb_ms INTEGER NOT NULL DEFAULT 0,
+            ok_count INTEGER NOT NULL DEFAULT 0,
+            fail_count INTEGER NOT NULL DEFAULT 0,
+            bytes_total INTEGER NOT NULL DEFAULT 0,
+            last_active_ms INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS client_cert (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            host_pattern TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'pfx',
+            cert_path TEXT NOT NULL DEFAULT '',
+            key_path TEXT NOT NULL DEFAULT '',
+            store_name TEXT NOT NULL DEFAULT 'My',
+            thumbprint TEXT NOT NULL DEFAULT '',
+            passphrase TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_client_cert_host ON client_cert(host_pattern);
+        CREATE TABLE IF NOT EXISTS pgp_keyring (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            armored_key TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_pgp_fingerprint ON pgp_keyring(fingerprint);
         """;
 
     public const string Migration7 = """

@@ -88,4 +88,22 @@ public enum ErrorCategory
     Media = 18,
     Cancelled = 19,
     InsufficientInfo = 20,
+    Pgp = 21,
+}
+
+/// <summary>PGP verification outcome for a completed task (v1.5.0, metalink + sidecar signatures).</summary>
+public enum PgpStatus
+{
+    /// <summary>No signature present or feature disabled.</summary>
+    None = 0,
+    /// <summary>Signature present; not yet checked.</summary>
+    Pending = 1,
+    /// <summary>Verified against an imported public key.</summary>
+    Verified = 2,
+    /// <summary>Signature did not match any imported key / invalid.</summary>
+    Failed = 3,
+    /// <summary>Signature present but no matching key in the keyring.</summary>
+    NoKey = 4,
+    /// <summary>Verification attempted but errored (malformed signature).</summary>
+    Error = 5,
 }

@@ -34,8 +34,8 @@ for (const t of targets) {
     }
   }
   if (zip) {
-    execSync(`cd ${t.name}/dist && zip -qr ../nova-${t.name}-1.4.1.zip .`, { stdio: 'inherit' });
-    console.log(`→ ${t.name}/nova-${t.name}-1.4.1.zip`);
+    execSync(`cd ${t.name}/dist && zip -qr ../nova-${t.name}-1.5.0.zip .`, { stdio: 'inherit' });
+    console.log(`→ ${t.name}/nova-${t.name}-1.5.0.zip`);
   }
 }
 console.log('done');

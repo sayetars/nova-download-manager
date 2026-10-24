@@ -33,6 +33,8 @@ public sealed class TaskRunner
     private readonly Action<long>? _quotaHook;
     private readonly Action<DownloadTask, IReadOnlyList<DownloadSegment>>? _publishLive;
     private readonly Func<string, string?>? _settings;
+    private readonly ServerProfileService? _profiles;
+    private readonly Security.PgpKeyringService? _pgpKeys;
     private long _lastLivePublishMs;
 
     public TaskRunner(HttpClient http, HttpProber prober, IDownloadTaskRepository tasks,
@@ -43,7 +45,9 @@ public sealed class TaskRunner
         LoginVault? vault = null, Antivirus? antivirus = null, string? tempRoot = null,
         Action<long>? quotaHook = null,
         Action<DownloadTask, IReadOnlyList<DownloadSegment>>? publishLive = null,
-        Func<string, string?>? settings = null)
+        Func<string, string?>? settings = null,
+        ServerProfileService? profiles = null,
+        Security.PgpKeyringService? pgpKeys = null)
     {
         _http = http;
         _prober = prober;
@@ -62,6 +66,8 @@ public sealed class TaskRunner
         _quotaHook = quotaHook;
         _publishLive = publishLive;
         _settings = settings;
+        _profiles = profiles;
+        _pgpKeys = pgpKeys;
     }
 
     public SpeedMeter Speed { get; } = new();
@@ -138,7 +144,10 @@ public sealed class TaskRunner
             }
 
             // ---- analyze / revalidate -------------------------------------
+            var probeSw = System.Diagnostics.Stopwatch.StartNew();
             var probe = await _prober.ProbeAsync(task.EffectiveUrl ?? task.Url, task.Referer, ct, task);
+            _profiles?.RecordTtfb(task.EffectiveUrl ?? task.Url, probeSw.ElapsedMilliseconds);
+            _profiles?.RecordResult(task.EffectiveUrl ?? task.Url, true);
 
             bool validatorChanged = false;
             if (task.ReceivedBytes > 0)
@@ -366,6 +375,9 @@ public sealed class TaskRunner
                     task.Validation = ValidationStatus.Passed;
                 }
             }
+
+            // ---- v1.5.0 (G26): PGP signature verification (metalink / sidecar) ----
+            if (await VerifyPgpAsync(task, dataFile, ct)) return;
 
             // ---- finalize --------------------------------------------------
             var finalPath = await dataFile.FinalizeAsync();
@@ -690,14 +702,18 @@ public sealed class TaskRunner
             ApplyTaskHeaders(req, task);
 
             HttpResponseMessage resp;
+            var sliceSw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 resp = await _prober.SendGuardedAsync(req, ct);
                 sources.Report(source, true);
+                _profiles?.RecordTtfb(source, sliceSw.ElapsedMilliseconds);
+                _profiles?.RecordResult(source, true);
             }
             catch (NovaHttpException)
             {
                 sources.Report(source, false);
+                _profiles?.RecordResult(source, false);
                 throw;
             }
 
@@ -734,9 +750,17 @@ public sealed class TaskRunner
                 }
 
                 if (!resp.IsSuccessStatusCode && resp.StatusCode != HttpStatusCode.PartialContent)
+                {
+                    _profiles?.RecordResult(source, false);
                     throw NovaHttpException.FromStatus(resp.StatusCode, source);
+                }
 
+                var speedStart = seg.Received;
                 await DrainSliceAsync(task, pool, seg, resp, file, knownLength, want, limiters, ct);
+                // v1.5.0 (G27): throughput sample for the per-server profile
+                var gained = seg.Received - speedStart;
+                if (gained > 0)
+                    _profiles?.RecordSpeed(source, gained, sliceSw.ElapsedMilliseconds);
             }
 
             if (!knownLength && seg.End >= 0) break; // reached EOF
@@ -819,7 +843,11 @@ public sealed class TaskRunner
             var meta = Metalink.ParseXml(body);
             if (meta is null) return false;
 
-            var ordered = meta.Mirrors.OrderBy(m => m.Priority).Select(m => m.Url).ToList();
+            // v1.5.0 (G27): metalink priority is authoritative; mirrors in the SAME
+            // priority bucket are ordered fastest-first using the per-server profiles.
+            var ordered = new List<string>();
+            foreach (var bucket in meta.Mirrors.GroupBy(m => m.Priority).OrderBy(g => g.Key))
+                ordered.AddRange(_profiles?.OrderMirrors(bucket.Select(m => m.Url)) ?? bucket.Select(m => m.Url));
             if (ordered.Count == 0) return false;
 
             task.Url = ordered[0];
@@ -830,9 +858,14 @@ public sealed class TaskRunner
             var algo = new[] { "sha256", "sha1", "md5", "crc32" }.FirstOrDefault(a => meta.Hashes.ContainsKey(a));
             if (algo is not null) task.ExpectedHash = $"{algo}:{meta.Hashes[algo]}";
             if (meta.Pieces is not null) task.PieceHashes = meta.Pieces.ToJson();
+            if (meta.SignaturePgp.Length > 0)
+            {
+                task.PgpSignature = Security.PgpVerifier.NormalizeSignaturePayload(meta.SignaturePgp);
+                task.PgpStatus = Domain.PgpStatus.Pending;
+            }
             var maxConn = meta.Mirrors.OrderBy(m => m.Priority).Select(m => m.MaxConnections).FirstOrDefault(v => v.HasValue);
             if (maxConn is { } mc && mc > 0) task.MaxConnections = Math.Clamp(mc, 1, 32);
-            EngineLog.Info($"metalink[{task.TaskKey}]: {ordered.Count} mirror(s), hash={algo ?? "none"}");
+            EngineLog.Info($"metalink[{task.TaskKey}]: {ordered.Count} mirror(s), hash={algo ?? "none"}, pgp={(task.PgpSignature.Length > 0 ? "yes" : "no")}");
             return true;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -889,6 +922,117 @@ public sealed class TaskRunner
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { /* sidecar probing is best-effort by design */ }
+    }
+
+    /// <summary>
+    /// v1.5.0 (G26): PGP detached-signature verification after download, before finalize.
+    /// Signature sources: metalink &lt;signature type="pgp"&gt; (captured at analyze) and
+    /// best-effort .sig/.asc sidecars. Policy: engine.metalink_pgp = off | warn | require.
+    /// Returns true when the task was terminally failed (caller must stop).
+    /// </summary>
+    private async Task<bool> VerifyPgpAsync(DownloadTask task, DownloadDataFile file, CancellationToken ct)
+    {
+        var policy = Security.PgpPolicyExtensions.Parse(Setting(Security.PgpKeyringService.PolicySetting));
+        if (policy == Security.PgpPolicy.Off) return false;
+
+        if (task.PgpSignature.Length == 0)
+        {
+            await TryFetchPgpSidecarAsync(task, ct);
+            if (task.PgpSignature.Length == 0)
+            {
+                if (policy == Security.PgpPolicy.Require)
+                {
+                    Fail(task, new NovaError("pgp_required", ErrorCategory.Pgp,
+                        "No PGP signature was found, but the current policy requires one."), retryable: false);
+                    return true;
+                }
+                return false; // warn-policy + no signature → nothing to do
+            }
+        }
+
+        SetState(task, DownloadState.Verifying, null);
+        _persistTask(task);
+
+        Security.PgpVerifyOutcome outcome;
+        try
+        {
+            var data = await File.ReadAllBytesAsync(file.TempPath, ct);
+            var keyring = _pgpKeys?.ArmoredKeys() ?? new List<string>();
+            outcome = Security.PgpVerifier.VerifyDetached(data, task.PgpSignature, keyring);
+        }
+        catch (Exception ex)
+        {
+            EngineLog.Warn($"pgp[{task.TaskKey}]: verify error: {ex.Message}");
+            task.PgpStatus = Domain.PgpStatus.Error;
+            _persistTask(task);
+            if (policy == Security.PgpPolicy.Require)
+            {
+                Fail(task, new NovaError("pgp_error", ErrorCategory.Pgp,
+                    "The PGP signature could not be processed."), retryable: false);
+                return true;
+            }
+            return false;
+        }
+
+        switch (outcome)
+        {
+            case Security.PgpVerifyOutcome.Verified:
+                task.PgpStatus = Domain.PgpStatus.Verified;
+                EngineLog.Info($"pgp[{task.TaskKey}]: signature VERIFIED");
+                break;
+            case Security.PgpVerifyOutcome.NoKey:
+                task.PgpStatus = Domain.PgpStatus.NoKey;
+                EngineLog.Warn($"pgp[{task.TaskKey}]: signature present but key not in keyring");
+                if (policy == Security.PgpPolicy.Require)
+                {
+                    Fail(task, new NovaError("pgp_no_key", ErrorCategory.Pgp,
+                        "The file is signed with a key that is not in your PGP keyring."), retryable: false);
+                    return true;
+                }
+                break;
+            default:
+                task.PgpStatus = Domain.PgpStatus.Failed;
+                EngineLog.Warn($"pgp[{task.TaskKey}]: signature INVALID");
+                if (policy == Security.PgpPolicy.Require)
+                {
+                    Fail(task, new NovaError("pgp_failed", ErrorCategory.Pgp,
+                        "The PGP signature does not match this file — it may have been tampered with."),
+                        retryable: false);
+                    return true;
+                }
+                _events.Emit(task, DownloadState.Verifying, "PGP signature check FAILED (warn policy)");
+                break;
+        }
+        _persistTask(task);
+        return false;
+    }
+
+    /// <summary>Best-effort fetch of a detached signature sidecar (url + ".sig" / ".asc").</summary>
+    private async Task TryFetchPgpSidecarAsync(DownloadTask task, CancellationToken ct)
+    {
+        try
+        {
+            if (Setting("engine.sidecar_verify") == "false") return;
+            var url = task.EffectiveUrl ?? task.Url;
+            if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return;
+            foreach (var ext in new[] { ".sig", ".asc" })
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url.Split('#')[0] + ext);
+                HttpProber.AddDefaultHeaders(req, task.Referer);
+                using var resp = await _prober.SendGuardedAsync(req, ct);
+                if (!resp.IsSuccessStatusCode) continue;
+                var body = await resp.Content.ReadAsStringAsync(ct);
+                if (body.Length == 0 || body.Length > 1024 * 1024) continue;
+                if (!body.Contains("PGP SIGNATURE", StringComparison.OrdinalIgnoreCase) &&
+                    !body.Contains("PGP MESSAGE", StringComparison.OrdinalIgnoreCase)) continue;
+                task.PgpSignature = Security.PgpVerifier.NormalizeSignaturePayload(body);
+                task.PgpStatus = Domain.PgpStatus.Pending;
+                EngineLog.Info($"pgp-sidecar[{task.TaskKey}]: {ext} signature discovered");
+                return;
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { /* best-effort by design */ }
     }
 
     /// <summary>Metalink piece-hash verification + in-place repair (aria2 --check-integrity parity).</summary>

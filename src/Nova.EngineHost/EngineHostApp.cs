@@ -37,6 +37,11 @@ public sealed class EngineHostApp : IAsyncDisposable
     private readonly FeedService _feedService;
     private readonly JsonRpcServer? _rpc;
     private readonly System.Timers.Timer _postActionTimer;
+    private readonly ServerProfileRepository _serverProfileRepo;
+    private readonly Nova.Engine.ServerProfileService _serverProfiles;
+    private readonly Nova.Engine.Security.ClientCertificateService _clientCerts;
+    private readonly Nova.Engine.Security.PgpKeyringService _pgpKeys;
+    private readonly Nova.Engine.YtDlp.YtDlpBridge _ytdlp;
     private string _pendingPostAction = "";
     private bool _postActionCancelled;
 
@@ -57,9 +62,17 @@ public sealed class EngineHostApp : IAsyncDisposable
         _settings = new SettingsRepository(LoadDb());
         _db = _dbInstance!;
 
+        // v1.5.0 G-track services (must exist before CreateHttpClient wires client certs)
+        _serverProfileRepo = new ServerProfileRepository(_db);
+        _serverProfiles = new Nova.Engine.ServerProfileService(_serverProfileRepo);
+        _clientCerts = new Nova.Engine.Security.ClientCertificateService(new ClientCertRepository(_db));
+        _pgpKeys = new Nova.Engine.Security.PgpKeyringService(new PgpKeyringRepository(_db));
+        _ytdlp = new Nova.Engine.YtDlp.YtDlpBridge(k => _settings.Get(k));
+
         _http = CreateHttpClient();
         _vault = new LoginVault(_db, _dataDir);
         _grabber = new GrabberService(_db);
+
         var antivirus = new Antivirus(
             enabled: _settings.Get("av.enabled") == "true",
             command: _settings.Get("av.command"));
@@ -70,7 +83,9 @@ public sealed class EngineHostApp : IAsyncDisposable
             new QueueRepository(_db), _settings, new EngineEventBus(),
             _http, downloads, defaultConnections: 4,
             media: new MediaPipeline(), vault: _vault, antivirus: antivirus, tempRoot: tempRoot,
-            quota: _quota);
+            quota: _quota,
+            profiles: _serverProfiles,
+            pgpKeys: _pgpKeys);
         _engineHttpClient = _http;
 
         _scheduler = new SchedulerService(_engine, _settings, new QueueRepository(_db));
@@ -81,7 +96,8 @@ public sealed class EngineHostApp : IAsyncDisposable
         _feedRules = new FeedRuleRepository(_db);
         _feedService = new FeedService(_engine, _feedRules, _http);
 
-        _router = new IpcMessageRouter(_engine, _scheduler, _settings, new QueueRepository(_db), _mediaProbe, _db, _dataDir, downloads, _vault, _grabber, _http, RequestShutdown, _syncRules, _syncService, _feedRules, _feedService);
+        _router = new IpcMessageRouter(_engine, _scheduler, _settings, new QueueRepository(_db), _mediaProbe, _db, _dataDir, downloads, _vault, _grabber, _http, RequestShutdown, _syncRules, _syncService, _feedRules, _feedService,
+            _ytdlp, _serverProfiles, _clientCerts, _pgpKeys);
         var token = EnsureAuthToken();
         _ipc = new IpcServer(_router, token);
         _router.Server = _ipc;
@@ -206,6 +222,7 @@ public sealed class EngineHostApp : IAsyncDisposable
             MaxConnectionsPerServer = 64,
             PooledConnectionLifetime = TimeSpan.FromMinutes(10),
         };
+        _clientCerts.Configure(handler); // v1.5.0 (G25): per-host TLS client certificates
         if (proxy.IsValid)
             proxy.Apply(handler, "*");   // host-level bypass handled by WebProxy.BypassList
         return new HttpClient(new SafeRedirectHandler(handler)) { Timeout = Timeout.InfiniteTimeSpan };
@@ -281,6 +298,7 @@ public sealed class EngineHostApp : IAsyncDisposable
             AutomaticDecompression = DecompressionMethods.None,
             MaxConnectionsPerServer = 64,
         };
+        _clientCerts.Configure(handler); // v1.5.0 (G25): per-host TLS client certificates
         if (proxy.IsValid)
             proxy.Apply(handler, "*");   // bypass decided per-request by ProxyConfig.IsBypassed
         return new HttpClient(new SafeRedirectHandler(handler)) { Timeout = Timeout.InfiniteTimeSpan };
@@ -310,6 +328,7 @@ public sealed class EngineHostApp : IAsyncDisposable
         await _ipc.DisposeAsync();
         _scheduler.Dispose();
         await _engine.DisposeAsync();
+        _serverProfiles.Dispose(); // v1.5.0: flush per-server profiles to SQLite
         _http.Dispose();
         await _db.DisposeAsync();
     }

@@ -150,6 +150,11 @@ public sealed record TaskSnapshot
     public string? SelectedFiles { get; init; }
     /// <summary>BitTorrent: super-seeding (BEP-16) enabled for this task.</summary>
     public bool SuperSeed { get; init; }
+    // ---- v1.5.0 additions ----
+    /// <summary>PGP verification outcome ("none|pending|verified|failed|nokey|error").</summary>
+    public string PgpStatus { get; init; } = "none";
+    /// <summary>True when a PGP signature payload was captured for this task.</summary>
+    public bool HasPgpSignature { get; init; }
 
     public static TaskSnapshot From(DownloadTask t) => new()
     {
@@ -189,6 +194,8 @@ public sealed record TaskSnapshot
         SeedAfter = t.SeedAfter,
         SelectedFiles = string.IsNullOrEmpty(t.SelectedFiles) ? null : t.SelectedFiles,
         SuperSeed = t.SuperSeed,
+        PgpStatus = t.PgpStatus.ToString().ToLowerInvariant(),
+        HasPgpSignature = !string.IsNullOrEmpty(t.PgpSignature),
     };
 }
 

@@ -25,6 +25,8 @@ public sealed class DownloadEngine : IAsyncDisposable
     private readonly LoginVault? _vault;
     private readonly Antivirus? _antivirus;
     private readonly string? _tempRoot;
+    private readonly ServerProfileService? _profiles;
+    private readonly Security.PgpKeyringService? _pgpKeys;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly System.Timers.Timer _retryTimer;
     private readonly List<string> _quotaPausedKeys = new();
@@ -54,7 +56,9 @@ public sealed class DownloadEngine : IAsyncDisposable
         HttpClient http, string defaultDir, int defaultConnections = 4,
         IMediaPipeline? media = null, LoginVault? vault = null,
         Antivirus? antivirus = null, string? tempRoot = null,
-        QuotaTracker? quota = null)
+        QuotaTracker? quota = null,
+        ServerProfileService? profiles = null,
+        Security.PgpKeyringService? pgpKeys = null)
     {
         _repo = repo;
         _segs = segs;
@@ -69,6 +73,8 @@ public sealed class DownloadEngine : IAsyncDisposable
         _antivirus = antivirus;
         _tempRoot = string.IsNullOrWhiteSpace(tempRoot) ? null : tempRoot;
         Quota = quota;
+        _profiles = profiles;
+        _pgpKeys = pgpKeys;
         _prober = new HttpProber(http);
         UpdateGlobalRateCap(ParseLong(settings.Get("engine.global_speed_cap")));
         _events.Subscribe(new EngineSelfSink(this));
@@ -407,7 +413,8 @@ public sealed class DownloadEngine : IAsyncDisposable
             _vault, _antivirus, _tempRoot,
             n => Quota?.OnBytes(n),
             (t, plan) => _livePlans[t.TaskKey] = plan.Select(s => new SegmentView(s.Index, s.Start, s.End, s.Received)).ToArray(),
-            k => _settings.Get(k));
+            k => _settings.Get(k),
+            _profiles, _pgpKeys);
 
         e.Runner = runner;
         _livePlans.TryRemove(e.Task.TaskKey, out _);

@@ -352,6 +352,63 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
     await _load();
     return ((resp['added'] ?? 0) as int, (resp['unchanged'] ?? 0) as int);
   }
+
+  // ---- v1.5.0 G-track -------------------------------------------------------
+
+  /// G17: starts the engine preview server for one task → streaming URL.
+  Future<Map<String, dynamic>?> previewStart(String taskKey) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return null;
+    return engine.call('preview_start', {'task_key': taskKey});
+  }
+
+  /// G17: opens the partial-file preview URL in the system media player.
+  Future<void> openPreview(String taskKey) async {
+    final resp = await previewStart(taskKey);
+    final url = resp?['url'] as String?;
+    if (url == null || !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS) return;
+    try {
+      if (Platform.isWindows) {
+        await Process.start('cmd', ['/c', 'start', '', url], mode: ProcessStartMode.detached);
+      } else if (Platform.isLinux) {
+        await Process.start('xdg-open', [url], mode: ProcessStartMode.detached);
+      } else {
+        await Process.start('open', [url], mode: ProcessStartMode.detached);
+      }
+    } catch (_) {/* no desktop handler configured */}
+  }
+
+  /// G28: analyze a page URL with yt-dlp → format list for the quality panel.
+  Future<Map<String, dynamic>?> ytdlpAnalyze(String url) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return null;
+    return engine.call('ytdlp_analyze', {'url': url});
+  }
+
+  /// G28: resolve one format and add the download through the engine.
+  Future<String?> ytdlpDownload({
+    required String url,
+    required String formatId,
+    String? fileName,
+    String? destinationDir,
+    String? title,
+    String? ext,
+    bool autoStart = true,
+  }) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return null;
+    final resp = await engine.call('ytdlp_download', {
+      'url': url,
+      'format_id': formatId,
+      if (fileName != null && fileName.isNotEmpty) 'file_name': fileName,
+      if (destinationDir != null && destinationDir.isNotEmpty) 'destination_dir': destinationDir,
+      if (title != null && title.isNotEmpty) 'title': title,
+      if (ext != null && ext.isNotEmpty) 'ext': ext,
+      'auto_start': autoStart,
+    });
+    await _load();
+    return resp['task_key'] as String?;
+  }
 }
 
 /// Engine status: connection + live stats.
@@ -493,4 +550,60 @@ final feedRulesProvider = FutureProvider.autoDispose<List<FeedRuleUi>>((ref) asy
   return (resp['rules'] as List)
       .map((e) => FeedRuleUi.fromJson((e as Map).cast<String, dynamic>()))
       .toList();
+});
+
+/// v1.5.0 (G28): yt-dlp availability + binary metadata.
+final ytdlpStatusProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  final engine = ref.watch(engineProvider);
+  if (engine == null) return {};
+  try {
+    return await engine.call('ytdlp_status');
+  } catch (_) {
+    return {};
+  }
+});
+
+/// v1.5.0 (G27): per-server performance profiles (refreshable).
+final serverProfilesProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final engine = ref.watch(engineProvider);
+  if (engine == null) return [];
+  try {
+    final resp = await engine.call('server_profiles');
+    return ((resp['profiles'] as List? ?? []))
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  } catch (_) {
+    return [];
+  }
+});
+
+/// v1.5.0 (G25): TLS client-certificate bindings.
+final clientCertsProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final engine = ref.watch(engineProvider);
+  if (engine == null) return [];
+  try {
+    final resp = await engine.call('list_client_certs');
+    return ((resp['certs'] as List? ?? []))
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  } catch (_) {
+    return [];
+  }
+});
+
+/// v1.5.0 (G26): imported PGP public keys.
+final pgpKeysProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final engine = ref.watch(engineProvider);
+  if (engine == null) return [];
+  try {
+    final resp = await engine.call('list_pgp_keys');
+    return ((resp['keys'] as List? ?? []))
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  } catch (_) {
+    return [];
+  }
 });

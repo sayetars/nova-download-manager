@@ -127,6 +127,12 @@ public sealed class DownloadTask
     /// <summary>BitTorrent: super-seeding (BEP-16) while seeding this task (v1.4.1).</summary>
     public bool SuperSeed { get; set; }
 
+    /// <summary>Metalink PGP signature payload (armored/base64 from &lt;signature type="pgp"&gt; or .sig/.asc sidecar), captured at metalink parse (v1.5.0).</summary>
+    public string PgpSignature { get; set; } = string.Empty;
+
+    /// <summary>PGP verification outcome for this task (v1.5.0).</summary>
+    public PgpStatus PgpStatus { get; set; } = PgpStatus.None;
+
     [JsonIgnore] public bool HasSpeedCap => SpeedCapBytes > 0;
 
     [JsonIgnore] public IReadOnlyList<string> Mirrors =>

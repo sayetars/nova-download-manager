@@ -27,6 +27,8 @@ public static class Metalink
         public Dictionary<string, string> Hashes { get; init; } = new();
         public PieceHashInfo? Pieces { get; init; }
         public List<MirrorUrl> Mirrors { get; init; } = new();
+        /// <summary>v1.5.0 (G26): PGP signature payload (armored/base64) from &lt;signature type="pgp"&gt;.</summary>
+        public string SignaturePgp { get; init; } = "";
     }
 
     private static readonly string[] MetalinkMimeTypes =
@@ -59,6 +61,7 @@ public static class Metalink
                 var hashes = new Dictionary<string, string>();
                 PieceHashInfo? pieces = null;
                 var mirrors = new List<MirrorUrl>();
+                var signature = "";
 
                 foreach (var el in fileEl.Elements())
                 {
@@ -86,6 +89,15 @@ public static class Metalink
                                     pieces ??= new PieceHashInfo { Algo = ptype, PieceSize = plen, Hashes = phashes };
                             }
                             break;
+                        case "signature":
+                        {
+                            // RFC 5854: <signature type="pgp">…</signature> (armored or base64)
+                            var sigType = ((string?)el.Attribute("type") ?? "").ToLowerInvariant();
+                            var sigValue = el.Value.Trim();
+                            if (sigType == "pgp" && sigValue.Length > 0 && sigValue.Length < 1024 * 1024)
+                                signature = sigValue;
+                            break;
+                        }
                         case "resources":
                             foreach (var u in el.Elements().Where(e => e.Name.LocalName == "url"))
                             {
@@ -101,7 +113,7 @@ public static class Metalink
                 }
 
                 if (name.Length > 0)
-                    files.Add(new MetalinkFile { FileName = name, Size = size, Hashes = hashes, Pieces = pieces, Mirrors = mirrors });
+                    files.Add(new MetalinkFile { FileName = name, Size = size, Hashes = hashes, Pieces = pieces, Mirrors = mirrors, SignaturePgp = signature });
             }
         }
 

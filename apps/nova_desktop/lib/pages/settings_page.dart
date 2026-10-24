@@ -347,6 +347,18 @@ class SettingsPage extends ConsumerWidget {
           const SizedBox(height: 6),
           Text(s.importFromIdmHint, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ]),
+        // ---- v1.5.0 G-track ------------------------------------------------------
+
+        _section(context, Icons.query_stats_rounded, s.ytdlpSection, [
+          _YtDlpStatusChip(),
+          const SizedBox(height: 8),
+          _settingField(context, engine, s.ytdlpPath, 'ytdlp.path',
+              settings['ytdlp.path'] ?? ''),
+        ]),
+
+        _SecuritySection(engine: engine, settings: settings),
+
+        _ServerProfilesSection(engine: engine),
       ],
     );
   }
@@ -1116,5 +1128,355 @@ class _SettingsSectionCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ---- v1.5.0 G-track widgets --------------------------------------------------
+
+/// G28: yt-dlp availability chip (version + path from the engine).
+class _YtDlpStatusChip extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = S.of(context);
+    final status = ref.watch(prov.ytdlpStatusProvider);
+    final cs = Theme.of(context).colorScheme;
+    return status.when(
+      loading: () => const SizedBox(
+          height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+      error: (e, _) => Text('$e', style: const TextStyle(fontSize: 12)),
+      data: (m) {
+        final available = m['available'] == true;
+        return Row(
+          children: [
+            Icon(available ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                size: 16, color: available ? Colors.green.shade600 : cs.error),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                available
+                    ? '${s.ytdlpDetected} · ${m['version'] ?? ''} · ${m['path'] ?? ''}'
+                    : s.ytdlpNoBinary,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: available ? null : cs.error),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// G25 + G26: TLS client certificates, PGP keyring and the Metalink PGP policy.
+class _SecuritySection extends ConsumerStatefulWidget {
+  final dynamic engine;
+  final Map<String, String> settings;
+  const _SecuritySection({required this.engine, required this.settings});
+
+  @override
+  ConsumerState<_SecuritySection> createState() => _SecuritySectionState();
+}
+
+class _SecuritySectionState extends ConsumerState<_SecuritySection> {
+  final _certHost = TextEditingController();
+  final _certPath = TextEditingController();
+  final _certKey = TextEditingController();
+  final _certThumb = TextEditingController();
+  final _certPass = TextEditingController();
+  String _certSource = 'pfx';
+  final _pgpLabel = TextEditingController();
+  final _pgpKey = TextEditingController();
+
+  @override
+  void dispose() {
+    _certHost.dispose();
+    _certPath.dispose();
+    _certKey.dispose();
+    _certThumb.dispose();
+    _certPass.dispose();
+    _pgpLabel.dispose();
+    _pgpKey.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.of(context);
+    final cs = Theme.of(context).colorScheme;
+    final certs = ref.watch(prov.clientCertsProvider);
+    final keys = ref.watch(prov.pgpKeysProvider);
+    final policy = (widget.settings['engine.metalink_pgp'] ?? 'warn').trim();
+
+    return sectionCard(context, Icons.security_rounded, s.clientCertsTitle, [
+      // ---- TLS client certificates (G25)
+      Text(s.clientCertsHint,
+          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+      const SizedBox(height: 8),
+      ...certs.maybeWhen(
+        data: (list) => [
+          for (final c in list)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.badge_outlined, size: 20),
+              title: Text('${c['host_pattern']} · ${c['source']}',
+                  style: const TextStyle(fontSize: 13)),
+              subtitle: Text(
+                  (c['cert_path'] ?? c['thumbprint'] ?? '').toString(),
+                  style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                  overflow: TextOverflow.ellipsis),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                onPressed: () async {
+                  await widget.engine?.call(
+                      'delete_client_cert', {'id': c['id']});
+                  ref.invalidate(prov.clientCertsProvider);
+                },
+              ),
+            ),
+        ],
+        orElse: () => const [SizedBox()],
+      ),
+      DropdownButtonFormField<String>(
+        initialValue: _certSource,
+        decoration: InputDecoration(labelText: s.certFilePath, isDense: true),
+        items: [
+          DropdownMenuItem(value: 'pfx', child: Text(s.certSourcePfx)),
+          DropdownMenuItem(value: 'pem', child: Text(s.certSourcePem)),
+          DropdownMenuItem(value: 'store', child: Text(s.certSourceStore)),
+        ],
+        onChanged: (v) => setState(() => _certSource = v ?? 'pfx'),
+      ),
+      const SizedBox(height: 6),
+      TextField(
+        controller: _certHost,
+        decoration: InputDecoration(
+            labelText: s.certHostPattern, isDense: true),
+      ),
+      const SizedBox(height: 6),
+      if (_certSource == 'store')
+        TextField(
+          controller: _certThumb,
+          decoration: InputDecoration(
+              labelText: s.certThumbprint, isDense: true),
+        )
+      else ...[
+        TextField(
+          controller: _certPath,
+          decoration: InputDecoration(
+              labelText: _certSource == 'pem' ? s.certFilePath : s.certFilePath,
+              isDense: true),
+        ),
+        if (_certSource == 'pem') ...[
+          const SizedBox(height: 6),
+          TextField(
+            controller: _certKey,
+            decoration:
+                InputDecoration(labelText: s.certKeyPath, isDense: true),
+          ),
+        ],
+        if (_certSource == 'pfx') ...[
+          const SizedBox(height: 6),
+          TextField(
+            controller: _certPass,
+            obscureText: true,
+            decoration: InputDecoration(
+                labelText: s.certPassphrase, isDense: true),
+          ),
+        ],
+      ],
+      const SizedBox(height: 8),
+      Align(
+        alignment: AlignmentDirectional.centerEnd,
+        child: OutlinedButton.icon(
+          icon: const Icon(Icons.add_card_outlined, size: 16),
+          label: Text(s.addClientCert),
+          onPressed: () async {
+            try {
+              await widget.engine?.call('save_client_cert', {
+                'host_pattern': _certHost.text.trim(),
+                'source': _certSource,
+                'cert_path': _certPath.text.trim(),
+                'key_path': _certKey.text.trim(),
+                'thumbprint': _certThumb.text.trim(),
+                'passphrase': _certPass.text,
+                'enabled': true,
+              });
+              if (mounted) {
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(SnackBar(content: Text(s.certSaved)));
+              }
+              ref.invalidate(prov.clientCertsProvider);
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(SnackBar(content: Text('$e')));
+              }
+            }
+          },
+        ),
+      ),
+
+      const Divider(height: 28),
+
+      // ---- PGP keyring + policy (G26)
+      Text(s.pgpKeysTitle, style: Theme.of(context).textTheme.titleSmall),
+      const SizedBox(height: 4),
+      Text(s.pgpKeysHint,
+          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+      const SizedBox(height: 8),
+      DropdownButtonFormField<String>(
+        initialValue: policy.isEmpty ? 'warn' : policy,
+        decoration: InputDecoration(labelText: s.pgpPolicyTitle, isDense: true),
+        items: [
+          DropdownMenuItem(value: 'off', child: Text(s.pgpPolicyOff)),
+          DropdownMenuItem(value: 'warn', child: Text(s.pgpPolicyWarn)),
+          DropdownMenuItem(value: 'require', child: Text(s.pgpPolicyRequire)),
+        ],
+        onChanged: (v) => widget.engine?.call('set_settings', {
+          'values': {'engine.metalink_pgp': v ?? 'warn'}
+        }),
+      ),
+      const SizedBox(height: 8),
+      ...keys.maybeWhen(
+        data: (list) => [
+          for (final k in list)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.key_rounded, size: 20),
+              title: Text('${k['label']}',
+                  style: const TextStyle(fontSize: 13)),
+              subtitle: Text('${k['fingerprint']}',
+                  style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                  overflow: TextOverflow.ellipsis),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                onPressed: () async {
+                  await widget.engine?.call('delete_pgp_key', {'id': k['id']});
+                  ref.invalidate(prov.pgpKeysProvider);
+                },
+              ),
+            ),
+        ],
+        orElse: () => const [SizedBox()],
+      ),
+      TextField(
+        controller: _pgpLabel,
+        decoration:
+            InputDecoration(labelText: s.pgpKeyLabel, isDense: true),
+      ),
+      const SizedBox(height: 6),
+      TextField(
+        controller: _pgpKey,
+        maxLines: 4,
+        minLines: 2,
+        style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+        decoration: InputDecoration(
+            labelText: s.pgpPasteKey, isDense: true, border: const OutlineInputBorder()),
+      ),
+      const SizedBox(height: 8),
+      Align(
+        alignment: AlignmentDirectional.centerEnd,
+        child: OutlinedButton.icon(
+          icon: const Icon(Icons.key_off_outlined, size: 16),
+          label: Text(s.addPgpKey),
+          onPressed: () async {
+            try {
+              await widget.engine?.call('save_pgp_key', {
+                'label': _pgpLabel.text.trim(),
+                'armored_key': _pgpKey.text.trim(),
+              });
+              ref.invalidate(prov.pgpKeysProvider);
+              _pgpKey.clear();
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(SnackBar(content: Text('$e')));
+              }
+            }
+          },
+        ),
+      ),
+    ]);
+  }
+}
+
+/// G27: per-server performance profiles table.
+class _ServerProfilesSection extends ConsumerWidget {
+  final dynamic engine;
+  const _ServerProfilesSection({required this.engine});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = S.of(context);
+    final profiles = ref.watch(prov.serverProfilesProvider);
+    return sectionCard(context, Icons.speed_rounded, s.serverProfilesTitle, [
+      Text(s.serverProfilesHint,
+          style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      const SizedBox(height: 8),
+      profiles.maybeWhen(
+        data: (list) => list.isEmpty
+            ? Text(s.noServersYet,
+                style: const TextStyle(fontSize: 12.5))
+            : Column(
+                children: [
+                  for (final p in list)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                          (p['active_now'] as int? ?? 0) > 0
+                              ? Icons.bolt_rounded
+                              : Icons.dns_outlined,
+                          size: 20),
+                      title: Text('${p['host']}',
+                          style: const TextStyle(fontSize: 13)),
+                      subtitle: Text(
+                        '${s.serverSpeed}: ${_fmt(p['ewma_bps'] as int? ?? 0)}/s · '
+                        '${s.serverLatency}: ${p['ewma_ttfb_ms'] ?? 0} ms · '
+                        '${s.serverSuccessRate}: ${_pct(p)} · '
+                        '${s.serverBytesServed}: ${_fmt(p['bytes'] as int? ?? 0)} · '
+                        '${s.serverScore}: ${p['score'] ?? 0}',
+                        style: const TextStyle(fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.restart_alt_rounded, size: 16),
+                      label: Text(s.serverReset),
+                      onPressed: () async {
+                        await engine?.call('reset_server_profiles');
+                        ref.invalidate(prov.serverProfilesProvider);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+        orElse: () => const SizedBox(
+            height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+      ),
+    ]);
+  }
+
+  static String _fmt(int b) {
+    if (b < 1024) return '$b B';
+    if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(1)} KB';
+    if (b < 1024 * 1024 * 1024) return '${(b / 1048576).toStringAsFixed(1)} MB';
+    return '${(b / 1073741824).toStringAsFixed(2)} GB';
+  }
+
+  static String _pct(Map<String, dynamic> p) {
+    final ok = (p['ok'] as num?)?.toDouble() ?? 0;
+    final fail = (p['fail'] as num?)?.toDouble() ?? 0;
+    if (ok + fail == 0) return '—';
+    return '${(100 * ok / (ok + fail)).toStringAsFixed(0)}%';
   }
 }

@@ -31,6 +31,14 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
     private readonly IDisposable _subscription;
     private readonly DateTime _startedAt = DateTime.UtcNow;
     private readonly NovaDatabase _db;
+    private readonly Nova.Engine.YtDlp.YtDlpBridge _ytdlp;
+    private readonly Nova.Engine.ServerProfileService _serverProfiles;
+    private readonly Nova.Engine.Security.ClientCertificateService _clientCerts;
+    private readonly Nova.Engine.Security.PgpKeyringService _pgpKeys;
+    private readonly ClientCertRepository _clientCertRepo;
+    private readonly SegmentRepository _segRepo;
+    private Nova.Engine.Preview.PreviewServer? _preview;
+    private readonly object _previewLock = new();
 
     // in-flight grabber runs (taskKey → progress), one at a time per engine
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Nova.Grabber.GrabberService.GrabberProgress> _grabberStatus = new();
@@ -39,7 +47,11 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
         IQueueRepository queues, MediaCandidatesService mediaProbe, NovaDatabase db, string dataDir, string downloadsDir,
         LoginVault vault, GrabberService grabber, HttpClient http, Action requestShutdown,
         ISyncRuleRepository? syncRules = null, SyncService? syncService = null,
-        IFeedRuleRepository? feedRules = null, FeedService? feedService = null)
+        IFeedRuleRepository? feedRules = null, FeedService? feedService = null,
+        Nova.Engine.YtDlp.YtDlpBridge? ytdlp = null,
+        Nova.Engine.ServerProfileService? serverProfiles = null,
+        Nova.Engine.Security.ClientCertificateService? clientCerts = null,
+        Nova.Engine.Security.PgpKeyringService? pgpKeys = null)
     {
         _engine = engine;
         _scheduler = scheduler;
@@ -58,6 +70,12 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
         _syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
         _feedRules = feedRules;
         _feedService = feedService;
+        _ytdlp = ytdlp ?? new Nova.Engine.YtDlp.YtDlpBridge(k => settings.Get(k));
+        _serverProfiles = serverProfiles ?? new Nova.Engine.ServerProfileService();
+        _clientCertRepo = new ClientCertRepository(db);
+        _clientCerts = clientCerts ?? new Nova.Engine.Security.ClientCertificateService(_clientCertRepo);
+        _pgpKeys = pgpKeys ?? new Nova.Engine.Security.PgpKeyringService(new PgpKeyringRepository(db));
+        _segRepo = new SegmentRepository(db);
 
         // engine events → broadcast to all IPC clients (throttled for progress)
         _subscription = engine.Events.Subscribe(new BusSink(this));
@@ -754,6 +772,236 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                         active = active,
                         exceptions = exceptions.Select(e => new { host = e.Host, max = e.Max }),
                     });
+                }
+
+                // ---- v1.5.0 G-track -----------------------------------------------------
+
+                case "server_profiles":
+                {
+                    var rows = _serverProfiles.Snapshot();
+                    var active = _engine.ActivePerHost();
+                    return Envelope.Ok(id, new
+                    {
+                        profiles = rows.Select(p => new
+                        {
+                            host = p.Host,
+                            ewma_bps = p.EwmaBps,
+                            ewma_ttfb_ms = p.EwmaTtfbMs,
+                            ok = p.OkCount,
+                            fail = p.FailCount,
+                            bytes = p.BytesTotal,
+                            last_active_ms = p.LastActiveMs,
+                            active_now = active.TryGetValue(p.Host, out var n) ? n : 0,
+                            score = Math.Round(p.Score, 1),
+                        }),
+                    });
+                }
+
+                case "reset_server_profiles":
+                {
+                    _serverProfiles.Reset();
+                    return Envelope.Ok(id);
+                }
+
+                case "preview_start":
+                {
+                    var req = env.PayloadAs<PreviewStartRequest>() ?? new();
+                    var task = _engine.Get(req.TaskKey);
+                    if (task is null)
+                        return Envelope.Error(id, "not_found", "not_found", "Task not found.");
+                    lock (_previewLock)
+                    {
+                        _preview ??= new Nova.Engine.Preview.PreviewServer(
+                            _engine.Get, _engine.GetSegmentViews,
+                            taskId => _segRepo.GetForTask(taskId));
+                        _preview.Start();
+                        return Envelope.Ok(id, new
+                        {
+                            url = _preview.UrlFor(task),
+                            port = _preview.Port,
+                            file_name = task.FileName,
+                            total_bytes = task.TotalBytes,
+                            received_bytes = task.ReceivedBytes,
+                            mime = Nova.Engine.Preview.PreviewServer.GuessMime(task.FileName),
+                        });
+                    }
+                }
+
+                case "preview_stop":
+                {
+                    lock (_previewLock)
+                    {
+                        _preview?.Dispose();
+                        _preview = null;
+                    }
+                    return Envelope.Ok(id);
+                }
+
+                case "ytdlp_status":
+                {
+                    var path = _ytdlp.BinaryPath();
+                    return Envelope.Ok(id, new
+                    {
+                        available = path is not null,
+                        path = path,
+                        version = _ytdlp.Version(),
+                    });
+                }
+
+                case "ytdlp_analyze":
+                {
+                    var req = env.PayloadAs<YtDlpAnalyzeRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.Url))
+                        return Envelope.Error(id, "bad_request", "protocol", "url required.");
+                    var info = await _ytdlp.AnalyzeAsync(req.Url, ct);
+                    return Envelope.Ok(id, new
+                    {
+                        extractor = info.Extractor,
+                        id = info.Id,
+                        title = info.Title,
+                        uploader = info.Uploader,
+                        duration_seconds = info.DurationSeconds,
+                        thumbnail = info.Thumbnail,
+                        webpage_url = info.WebpageUrl,
+                        formats = info.Formats.Select(f => new
+                        {
+                            format_id = f.FormatId,
+                            ext = f.Ext,
+                            resolution = f.Resolution,
+                            fps = f.Fps,
+                            vcodec = f.Vcodec,
+                            acodec = f.Acodec,
+                            tbr = f.Tbr,
+                            abr = f.Abr,
+                            filesize = f.EffectiveSize,
+                            protocol = f.Protocol,
+                            note = f.Note,
+                            direct = f.DirectDownloadable,
+                        }),
+                    });
+                }
+
+                case "ytdlp_download":
+                {
+                    var req = env.PayloadAs<YtDlpDownloadRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.Url) || string.IsNullOrWhiteSpace(req.FormatId))
+                        return Envelope.Error(id, "bad_request", "protocol", "url and format_id required.");
+                    var urls = await _ytdlp.ResolveAsync(req.Url, req.FormatId, ct);
+                    var direct = urls[0]; // engine downloads the resolved URL (HLS manifests route to the media pipeline)
+
+                    // sensible file name: explicit > title.ext > from-URL
+                    var name = req.FileName;
+                    if (string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(req.Title))
+                    {
+                        var ext = string.IsNullOrWhiteSpace(req.Ext)
+                            ? (Path.GetExtension(direct.Split('?')[0]) is { Length: > 1 } e ? e.TrimStart('.') : "mp4")
+                            : req.Ext;
+                        name = $"{FilenamePolicy.SanitizeFileName(req.Title)}.{ext}";
+                    }
+
+                    var outcome = _engine.Add(new NewDownload
+                    {
+                        Url = direct,
+                        DestinationDir = req.DestinationDir,
+                        FileName = name,
+                        Referer = req.Referer ?? req.Url,
+                        Cookies = req.Cookies,
+                        Sequential = true,   // enables partial preview while it streams in
+                        AutoStart = req.AutoStart,
+                        MediaSelection = Nova.Engine.YtDlp.Json.Selection(new { source = "ytdlp", page = req.Url, format_id = req.FormatId }),
+                    });
+                    if (!outcome.Ok)
+                        return Envelope.Error(id, outcome.Error!.Code, outcome.Error.Category.ToString().ToLowerInvariant(), outcome.Error.Message);
+                    return Envelope.Ok(id, new
+                    {
+                        task_key = outcome.Value!.TaskKey,
+                        task_id = outcome.Value.TaskId,
+                        duplicate = outcome.Value.Duplicate,
+                        resolved_url = direct,
+                    });
+                }
+
+                case "list_client_certs":
+                {
+                    var rows = _clientCertRepo.List();
+                    return Envelope.Ok(id, new
+                    {
+                        certs = rows.Select(c => new
+                        {
+                            id = c.Id,
+                            host_pattern = c.HostPattern,
+                            source = c.Source,
+                            cert_path = c.CertPath,
+                            key_path = c.KeyPath,
+                            store_name = c.StoreName,
+                            thumbprint = c.Thumbprint,
+                            enabled = c.Enabled,
+                        }),
+                    });
+                }
+
+                case "save_client_cert":
+                {
+                    var req = env.PayloadAs<SaveClientCertRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.HostPattern) || req.HostPattern.Length > 253)
+                        return Envelope.Error(id, "bad_request", "protocol", "host_pattern required.");
+                    var binding = new ClientCertBinding
+                    {
+                        HostPattern = req.HostPattern,
+                        Source = string.IsNullOrWhiteSpace(req.Source) ? "pfx" : req.Source,
+                        CertPath = req.CertPath ?? "",
+                        KeyPath = req.KeyPath ?? "",
+                        StoreName = string.IsNullOrWhiteSpace(req.StoreName) ? "My" : req.StoreName,
+                        Thumbprint = req.Thumbprint ?? "",
+                        Enabled = req.Enabled,
+                    };
+                    var error = _clientCerts.Validate(binding, req.Passphrase ?? "");
+                    if (error is not null)
+                        return Envelope.Error(id, "cert_invalid", "tls", error);
+                    var id2 = _clientCertRepo.Save(binding, req.Passphrase ?? "");
+                    return Envelope.Ok(id, new { id = id2 });
+                }
+
+                case "delete_client_cert":
+                {
+                    var req = env.PayloadAs<DeleteClientCertRequest>() ?? new();
+                    return _clientCertRepo.Delete(req.Id)
+                        ? Envelope.Ok(id)
+                        : Envelope.Error(id, "not_found", "not_found", "Binding not found.");
+                }
+
+                case "list_pgp_keys":
+                {
+                    var rows = _pgpKeys.List();
+                    return Envelope.Ok(id, new
+                    {
+                        keys = rows.Select(k => new
+                        {
+                            id = k.Id,
+                            label = k.Label,
+                            fingerprint = k.Fingerprint,
+                            created_at_ms = k.CreatedAt.ToUnixTimeMilliseconds(),
+                        }),
+                    });
+                }
+
+                case "save_pgp_key":
+                {
+                    var req = env.PayloadAs<SavePgpKeyRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.ArmoredKey))
+                        return Envelope.Error(id, "bad_request", "protocol", "armored_key required.");
+                    var error = _pgpKeys.Import(req.Label ?? "", req.ArmoredKey);
+                    if (error is not null)
+                        return Envelope.Error(id, "pgp_invalid", "pgp", error);
+                    return Envelope.Ok(id, new { fingerprint = Nova.Engine.Security.PgpVerifier.FingerprintOf(req.ArmoredKey) });
+                }
+
+                case "delete_pgp_key":
+                {
+                    var req = env.PayloadAs<DeletePgpKeyRequest>() ?? new();
+                    return _pgpKeys.Delete(req.Id)
+                        ? Envelope.Ok(id)
+                        : Envelope.Error(id, "not_found", "not_found", "Key not found.");
                 }
 
                 default:
