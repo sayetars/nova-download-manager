@@ -31,6 +31,8 @@ public sealed class EngineHostApp : IAsyncDisposable
     private readonly LoginVault _vault;
     private readonly GrabberService _grabber;
     private readonly QuotaTracker _quota;
+    private readonly SyncRuleRepository _syncRules;
+    private readonly SyncService _syncService;
     private readonly System.Timers.Timer _postActionTimer;
     private string _pendingPostAction = "";
     private bool _postActionCancelled;
@@ -71,8 +73,10 @@ public sealed class EngineHostApp : IAsyncDisposable
         _scheduler = new SchedulerService(_engine, _settings, new QueueRepository(_db));
         _scheduler.SchedulerStateChanged += s => _ipc?.Broadcast("engine_status", BuildStatus());
         _mediaProbe = new MediaCandidatesService(_http);
+        _syncRules = new SyncRuleRepository(_db);
+        _syncService = new SyncService(_engine, _syncRules, _http);
 
-        _router = new IpcMessageRouter(_engine, _scheduler, _settings, new QueueRepository(_db), _mediaProbe, _db, _dataDir, downloads, _vault, _grabber, _http, RequestShutdown);
+        _router = new IpcMessageRouter(_engine, _scheduler, _settings, new QueueRepository(_db), _mediaProbe, _db, _dataDir, downloads, _vault, _grabber, _http, RequestShutdown, _syncRules, _syncService);
         var token = EnsureAuthToken();
         _ipc = new IpcServer(_router, token);
         _router.Server = _ipc;
@@ -275,6 +279,7 @@ public sealed class EngineHostApp : IAsyncDisposable
     {
         _postActionTimer.Stop();
         _postActionTimer.Dispose();
+        _syncService.Dispose();
         await _ipc.DisposeAsync();
         _scheduler.Dispose();
         await _engine.DisposeAsync();

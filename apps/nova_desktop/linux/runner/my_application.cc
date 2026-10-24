@@ -11,9 +11,20 @@ struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
   FlMethodChannel* dnd_channel;
+  FlMethodChannel* window_channel;
+  gboolean mini_mode;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+// True when the process was launched with the `--mini` argument (progress window).
+static gboolean nova_has_mini_arg(MyApplication* self) {
+  if (self->dart_entrypoint_arguments == nullptr) return FALSE;
+  for (int i = 0; self->dart_entrypoint_arguments[i] != nullptr; i++) {
+    if (g_strcmp0(self->dart_entrypoint_arguments[i], "--mini") == 0) return TRUE;
+  }
+  return FALSE;
+}
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
@@ -57,8 +68,17 @@ static void nova_dnd_data_received(GtkWidget* widget, GdkDragContext* context,
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+  self->mini_mode = nova_has_mini_arg(self);
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+
+  // Nova mini progress window (IDM parity): compact, always on top, no taskbar entry.
+  if (self->mini_mode) {
+    gtk_window_set_title(window, "Nova — mini");
+    gtk_window_set_default_size(window, 340, 460);
+    gtk_window_set_keep_above(window, TRUE);
+    gtk_window_set_skip_taskbar_hint(window, TRUE);
+  }
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -67,7 +87,7 @@ static void my_application_activate(GApplication* application) {
   // in case the window manager does more exotic layout, e.g. tiling.
   // If running on Wayland assume the header bar will work (may need changing
   // if future cases occur).
-  gboolean use_header_bar = TRUE;
+  gboolean use_header_bar = !self->mini_mode;
 #ifdef GDK_WINDOWING_X11
   GdkScreen* screen = gtk_window_get_screen(window);
   if (GDK_IS_X11_SCREEN(screen)) {
@@ -83,11 +103,13 @@ static void my_application_activate(GApplication* application) {
     gtk_header_bar_set_title(header_bar, "nova_desktop");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
-  } else {
+  } else if (!self->mini_mode) {
     gtk_window_set_title(window, "nova_desktop");
   }
 
-  gtk_window_set_default_size(window, 1280, 720);
+  if (!self->mini_mode) {
+    gtk_window_set_default_size(window, 1280, 720);
+  }
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
@@ -115,15 +137,64 @@ static void my_application_activate(GApplication* application) {
                                              fl_view_get_engine(view)),
                                              "nova/dnd", FL_METHOD_CODEC(
                                              fl_standard_method_codec_new()));
-  static GtkTargetEntry nova_dnd_targets[] = {
-      {(gchar*)"text/uri-list", 0, 0},
-      {(gchar*)"text/plain", 0, 1},
-      {(gchar*)"TEXT", 0, 2},
-  };
-  gtk_drag_dest_set(GTK_WIDGET(view), GTK_DEST_DEFAULT_ALL, nova_dnd_targets,
-                    G_N_ELEMENTS(nova_dnd_targets), GDK_ACTION_COPY);
-  g_signal_connect(view, "drag-data-received",
-                   G_CALLBACK(nova_dnd_data_received), self);
+  // Nova window control bridge (method channel "nova/window"): always-on-top
+  // and sizing, invoked by the Dart mini window after boot.
+  self->window_channel = fl_method_channel_new(fl_engine_get_binary_messenger(
+                                                  fl_view_get_engine(view)),
+                                                  "nova/window", FL_METHOD_CODEC(
+                                                  fl_standard_method_codec_new()));
+  fl_method_channel_set_method_call_handler(
+      self->window_channel,
+      [](FlMethodChannel* channel, FlMethodCall* call, gpointer user_data) {
+        MyApplication* self = MY_APPLICATION(user_data);
+        GtkWindow* win =
+            GTK_WINDOW(gtk_application_get_active_window(GTK_APPLICATION(self)));
+        const gchar* name = fl_method_call_get_name(call);
+        FlValue* args = fl_method_call_get_args(call);
+        g_autoptr(FlMethodResponse) response = nullptr;
+        if (g_strcmp0(name, "setAlwaysOnTop") == 0 && win != nullptr) {
+          gboolean top = TRUE;
+          FlValueType t = fl_value_get_type(args);
+          if (t == FL_VALUE_TYPE_BOOL) {
+            top = fl_value_get_bool(args);
+          } else if (t == FL_VALUE_TYPE_MAP) {
+            FlValue* v = fl_value_lookup_string(args, "value");
+            if (v != nullptr) top = fl_value_get_bool(v);
+          }
+          gtk_window_set_keep_above(win, top);
+          response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+        } else if (g_strcmp0(name, "setSize") == 0 && win != nullptr) {
+          double w = 340, h = 460;
+          if (fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+            FlValue* wv = fl_value_lookup_string(args, "width");
+            FlValue* hv = fl_value_lookup_string(args, "height");
+            if (wv != nullptr) w = fl_value_get_float(wv);
+            if (hv != nullptr) h = fl_value_get_float(hv);
+          }
+          gtk_window_resize(win, (gint)w, (gint)h);
+          response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+        } else {
+          response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+        }
+        GError* error = nullptr;
+        if (!fl_method_call_respond(call, response, &error)) {
+          g_warning("nova/window respond failed: %s", error ? error->message : "?");
+          g_clear_error(&error);
+        }
+      },
+      self, nullptr);
+
+  if (!self->mini_mode) {
+    static GtkTargetEntry nova_dnd_targets[] = {
+        {(gchar*)"text/uri-list", 0, 0},
+        {(gchar*)"text/plain", 0, 1},
+        {(gchar*)"TEXT", 0, 2},
+    };
+    gtk_drag_dest_set(GTK_WIDGET(view), GTK_DEST_DEFAULT_ALL, nova_dnd_targets,
+                      G_N_ELEMENTS(nova_dnd_targets), GDK_ACTION_COPY);
+    g_signal_connect(view, "drag-data-received",
+                     G_CALLBACK(nova_dnd_data_received), self);
+  }
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

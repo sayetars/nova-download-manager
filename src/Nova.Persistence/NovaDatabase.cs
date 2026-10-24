@@ -45,6 +45,7 @@ public sealed class NovaDatabase : IAsyncDisposable
         if (SchemaVersion < 3) { RunMigration(3, Sql.Migration3); SchemaVersion = 3; }
         if (SchemaVersion < 4) { RunMigration(4, Sql.Migration4); SchemaVersion = 4; }
         if (SchemaVersion < 5) { RunMigration(5, Sql.Migration5); SchemaVersion = 5; }
+        if (SchemaVersion < 6) { RunMigration(6, Sql.Migration6); SchemaVersion = 6; }
     }
 
     private void RunMigration(int version, string sql)
@@ -264,5 +265,26 @@ internal static class Sql
             bytes INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS ix_quota_time ON byte_quota_log(at_ms);
+        """;
+
+    public const string Migration6 = """
+        ALTER TABLE download_queue ADD COLUMN schedule_json TEXT NOT NULL DEFAULT '';
+        CREATE TABLE IF NOT EXISTS sync_rule (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            urls TEXT NOT NULL DEFAULT '',
+            destination_dir TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT 'other',
+            interval_minutes INTEGER NOT NULL DEFAULT 60,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            last_run_ms INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS sync_state (
+            rule_id INTEGER NOT NULL REFERENCES sync_rule(id) ON DELETE CASCADE,
+            url TEXT NOT NULL,
+            etag TEXT,
+            last_modified TEXT,
+            PRIMARY KEY (rule_id, url)
+        );
         """;
 }

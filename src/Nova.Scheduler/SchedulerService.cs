@@ -42,7 +42,7 @@ public sealed class SchedulerService : IDisposable
         try
         {
             var active = _engine.ActiveCount;
-            var queued = _engine.GetQueued();
+            var queued = _engine.GetQueued().ToList();
             var window = InAllowedWindow();
             var batteryOk = StartOnBattery || BatteryStatus.OnAcPower;
 
@@ -57,15 +57,27 @@ public sealed class SchedulerService : IDisposable
 
             var perQueue = _queues.GetAll().ToDictionary(q => q.Name, q => q);
 
+            // IDM parity — per-server connection caps: host → running-task counts.
+            var activePerHost = new Dictionary<string, int>(_engine.ActivePerHost(), StringComparer.OrdinalIgnoreCase);
+
             while (active < MaxConcurrent)
             {
                 var next = PickNext(queued, perQueue, active);
                 if (next is null) break;
                 var cap = perQueue.GetValueOrDefault(next.QueueName)?.MaxConcurrent ?? 0;
                 var runningInQueue = _engine.All().Count(t => t.QueueName == next.QueueName && t.State == DownloadState.Downloading);
-                if (cap > 0 && runningInQueue >= cap) continue;
+                if (cap > 0 && runningInQueue >= cap) { queued.Remove(next); continue; }
+
+                // IDM parity — per-server caps + per-queue start/stop schedules.
+                var host = PerServerPolicy.HostOf(next.Url);
+                if (!PerServerPolicy.MayStart(host, activePerHost, _settings)) { queued.Remove(next); continue; }
+                var queueInfo = perQueue.GetValueOrDefault(next.QueueName);
+                if (queueInfo is not null && !QueueSchedule.MayRun(queueInfo.ScheduleJson, DateTimeOffset.Now))
+                { queued.Remove(next); continue; }
 
                 if (!_engine.TryStartTask(next.TaskKey)) break;
+                if (host.Length > 0)
+                    activePerHost[host] = activePerHost.GetValueOrDefault(host, 0) + 1;
                 _queuedSince.Remove(next.TaskKey);
                 active++;
             }

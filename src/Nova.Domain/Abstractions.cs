@@ -71,3 +71,17 @@ public interface ISettingsRepository
     void Set(string key, string value);
     IReadOnlyDictionary<string, string> GetAll();
 }
+
+public interface ISyncRuleRepository
+{
+    IReadOnlyList<SyncRule> GetAll();
+    SyncRule? Get(long id);
+    long Insert(SyncRule rule);
+    void Update(SyncRule rule);
+    void Delete(long id);
+    void SetLastRun(long id, long atMs);
+    /// <summary>Stored validators (ETag / Last-Modified) for one rule's URLs.</summary>
+    IReadOnlyDictionary<string, (string? ETag, string? LastModified)> GetValidators(long ruleId);
+    void SaveValidator(long ruleId, string url, string? etag, string? lastModified);
+    void ForgetRule(long ruleId);
+}

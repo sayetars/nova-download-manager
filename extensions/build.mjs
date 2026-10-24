@@ -26,14 +26,16 @@ for (const t of targets) {
     });
   }
   copyFileSync(`${t.name}/manifest.json`, `${out}/manifest.json`);
+  copyFileSync(`shared/ui/options.html`, `${out}/options.html`);
+  copyFileSync(`shared/ui/options.js`, `${out}/options.js`);
   for (const size of [16, 32, 48, 128]) {
     if (existsSync(`${t.name}/icons/icon${size}.png`)) {
       copyFileSync(`${t.name}/icons/icon${size}.png`, `${out}/icons/icon${size}.png`);
     }
   }
   if (zip) {
-    execSync(`cd ${t.name}/dist && zip -qr ../nova-${t.name}-1.1.0.zip .`, { stdio: 'inherit' });
-    console.log(`→ ${t.name}/nova-${t.name}-1.1.0.zip`);
+    execSync(`cd ${t.name}/dist && zip -qr ../nova-${t.name}-1.2.0.zip .`, { stdio: 'inherit' });
+    console.log(`→ ${t.name}/nova-${t.name}-1.2.0.zip`);
   }
 }
 console.log('done');

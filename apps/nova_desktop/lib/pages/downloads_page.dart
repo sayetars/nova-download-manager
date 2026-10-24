@@ -34,6 +34,8 @@ class DownloadsPage extends ConsumerWidget {
                   t.url.toLowerCase().contains(search.toLowerCase()))
               .toList();
         }
+        final sortMode = ref.watch(prov.sortModeProvider);
+        list = sortMode.apply(list);
         if (list.isEmpty) return _empty(context, s);
         return Column(
           children: [
@@ -45,6 +47,7 @@ class DownloadsPage extends ConsumerWidget {
                   const SizedBox(width: 6),
                   Text(s.downloaded, style: Theme.of(context).textTheme.bodySmall),
                   const Spacer(),
+                  _sortButton(context, ref, s, sortMode),
                   if (filter.value == 'completed')
                     TextButton.icon(
                       onPressed: () => ref.read(prov.tasksProvider.notifier).clearCompleted(),
@@ -83,6 +86,43 @@ class DownloadsPage extends ConsumerWidget {
         'media' => all.where((t) => t.kind != 'file'),
         _ => all,
       };
+
+  /// IDM parity v1.2.0 — sortable columns as a sort menu (field + direction).
+  Widget _sortButton(BuildContext context, WidgetRef ref, S s, prov.SortMode sortMode) {
+    final cs = Theme.of(context).colorScheme;
+    final labels = <prov.SortField, String>{
+      prov.SortField.added: s.sortAdded,
+      prov.SortField.name: s.sortName,
+      prov.SortField.size: s.sortSize,
+      prov.SortField.progress: s.sortProgress,
+      prov.SortField.state: s.sortState,
+      prov.SortField.speed: s.sortSpeed,
+    };
+    return PopupMenuButton<prov.SortField>(
+      tooltip: s.sortBy,
+      icon: Icon(sortMode.field == prov.SortField.added ? Icons.sort_rounded : Icons.sort,
+          size: 19, color: sortMode.field == prov.SortField.added ? cs.onSurfaceVariant : cs.primary),
+      onSelected: (f) =>
+          ref.read(prov.sortModeProvider.notifier).toggle(f),
+      itemBuilder: (context) => [
+        for (final f in prov.SortField.values)
+          PopupMenuItem(
+            value: f,
+            child: Row(
+              children: [
+                if (sortMode.field == f)
+                  Icon(sortMode.ascending ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+                      size: 16, color: cs.primary)
+                else
+                  const SizedBox(width: 16),
+                const SizedBox(width: 8),
+                Text(labels[f] ?? ''),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
 
   Widget _empty(BuildContext context, S s) => Center(
         child: Column(

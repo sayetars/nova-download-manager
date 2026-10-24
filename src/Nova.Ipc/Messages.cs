@@ -190,6 +190,37 @@ public sealed class SaveQueueRequest
     public string? DestinationDir { get; set; }
     public int? MaxConcurrent { get; set; }
     public long? SpeedCapBytes { get; set; }
+    /// <summary>Per-queue start/stop schedule JSON (QueueScheduleRule[]); null = keep.</summary>
+    public string? ScheduleJson { get; set; }
+}
+
+public sealed class SaveSyncRuleRequest
+{
+    public long? Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Urls { get; set; } = string.Empty;
+    public string DestinationDir { get; set; } = string.Empty;
+    public string Category { get; set; } = "other";
+    public int IntervalMinutes { get; set; } = 60;
+    public bool Enabled { get; set; } = true;
+}
+
+public sealed class RunSyncRequest
+{
+    public long Id { get; set; }
+    public bool Force { get; set; } = true;
+}
+
+public sealed class DeleteSyncRuleRequest
+{
+    public long Id { get; set; }
+}
+
+public sealed class ImportIdmRequest
+{
+    public string Content { get; set; } = string.Empty;
+    public string FileName { get; set; } = "";
+    public bool AutoStart { get; set; }
 }
 
 public sealed class SaveScheduleRequest
@@ -205,7 +236,7 @@ public sealed class SaveScheduleRequest
 
 public sealed class EngineStatusResponse
 {
-    public string EngineVersion { get; set; } = "1.1.0";
+    public string EngineVersion { get; set; } = "1.2.0";
     public int ActiveTasks { get; set; }
     public int QueuedTasks { get; set; }
     public long GlobalSpeed { get; set; }

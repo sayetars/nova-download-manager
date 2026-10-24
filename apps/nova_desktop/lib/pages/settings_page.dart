@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -198,6 +199,27 @@ class SettingsPage extends ConsumerWidget {
         // ---- IDM parity: byte quota -------------------------------------------
         _QuotaSection(settings: settings, engine: engine),
 
+        // ---- IDM parity v1.2.0: per-server connection caps ---------------------
+        _PerServerSection(settings: settings, engine: engine),
+
+        // ---- IDM parity v1.2.0: download-complete dialog customization --------
+        _section(context, Icons.notifications_outlined, s.completeDialog, [
+          Builder(builder: (context) {
+            final mode = settings['ui.complete_dialog'] ?? 'always';
+            return SegmentedButton<String>(
+              segments: [
+                ButtonSegment(value: 'always', label: Text(s.completeDialogAlways)),
+                ButtonSegment(value: 'media', label: Text(s.completeDialogVideo)),
+                ButtonSegment(value: 'never', label: Text(s.completeDialogNever)),
+              ],
+              selected: {mode},
+              onSelectionChanged: (sel) => engine?.call('set_settings', {
+                'values': {'ui.complete_dialog': sel.first}
+              }),
+            );
+          }),
+        ]),
+
         // ---- check for updates --------------------------------------------------
         _section(context, Icons.system_update_alt_rounded, s.updateNow, [
           Row(children: [
@@ -259,7 +281,15 @@ class SettingsPage extends ConsumerWidget {
                 }
               },
             ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.input_rounded, size: 18),
+              label: Text(s.importFromIdm),
+              onPressed: () => _importFromIdm(context, ref, s),
+            ),
           ]),
+          const SizedBox(height: 6),
+          Text(s.importFromIdmHint, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ]),
       ],
     );
@@ -307,30 +337,9 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
-  Widget _section(BuildContext context, IconData icon, String title, List<Widget> children) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
-                  const SizedBox(width: 10),
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-                ],
-              ),
-              const SizedBox(height: 14),
-              ...children,
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _section(BuildContext context, IconData icon, String title, List<Widget> children) =>
+      sectionCard(context, icon, title, children);
+
 }
 
 /// Proxy section (IDM parity): http/https/socks4/4a/5 + auth + bypass list.
@@ -851,6 +860,201 @@ class _QuotaSection extends StatelessWidget {
                   ),
                 ),
               ]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// IDM parity v1.2.0 — per-server connection caps: a global default plus
+/// per-host exceptions, stored in settings as JSON.
+class _PerServerSection extends StatefulWidget {
+  const _PerServerSection({required this.settings, required this.engine});
+  final Map<String, String> settings;
+  final dynamic engine;
+
+  @override
+  State<_PerServerSection> createState() => _PerServerSectionState();
+}
+
+class _PerServerSectionState extends State<_PerServerSection> {
+  List<Map<String, dynamic>> _exceptions = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  void _load() {
+    final raw = widget.settings['scheduler.server_exceptions'] ?? '';
+    try {
+      final list = raw.isEmpty ? <Object?>[] : jsonDecode(raw) as List;
+      setState(() => _exceptions = list
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList());
+    } catch (_) {
+      setState(() => _exceptions = []);
+    }
+  }
+
+  Future<void> _save() async {
+    await widget.engine?.call('set_settings', {
+      'values': {'scheduler.server_exceptions': jsonEncode(_exceptions)}
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.of(context);
+    final cs = Theme.of(context).colorScheme;
+    final def = int.tryParse(widget.settings['scheduler.per_server_max'] ?? '') ?? 0;
+
+    return sectionCard(context, Icons.dns_outlined, s.perServerMax, [
+      Row(
+        children: [
+          Expanded(
+            child: DropdownButtonFormField<int>(
+              initialValue: def,
+              decoration: InputDecoration(labelText: '${s.perServerMax} (${s.perServerHint})', isDense: true),
+              items: [
+                for (final v in const [0, 1, 2, 3, 4, 6, 8])
+                  DropdownMenuItem(value: v, child: Text(v == 0 ? s.unlimited : '$v')),
+              ],
+              onChanged: (v) => widget.engine?.call('set_settings', {
+                'values': {'scheduler.per_server_max': '${v ?? 0}'}
+              }),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      if (_exceptions.isEmpty)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text(s.perServerHint, style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+        )
+      else
+        for (var i = 0; i < _exceptions.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: TextFormField(
+                    initialValue: (_exceptions[i]['host'] ?? '') as String,
+                    decoration: InputDecoration(labelText: s.host, isDense: true),
+                    onChanged: (v) => _exceptions[i]['host'] = v.trim(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextFormField(
+                    initialValue: '${_exceptions[i]['max'] ?? 0}',
+                    decoration: InputDecoration(labelText: s.maxConnections, isDense: true),
+                    keyboardType: TextInputType.number,
+                    onChanged: (v) => _exceptions[i]['max'] = int.tryParse(v) ?? 0,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  onPressed: () {
+                    setState(() => _exceptions.removeAt(i));
+                    _save();
+                  },
+                ),
+              ],
+            ),
+          ),
+      Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: TextButton.icon(
+          onPressed: () => setState(() => _exceptions.add({'host': '', 'max': 1})),
+          icon: const Icon(Icons.add_rounded, size: 18),
+          label: Text(s.addServerException),
+        ),
+      ),
+      Align(
+        alignment: AlignmentDirectional.centerEnd,
+        child: FilledButton.tonal(
+          onPressed: _save,
+          child: Text(s.save),
+        ),
+      ),
+    ]);
+  }
+}
+
+/// IDM import: paste-dialog + engine-side extraction → batch add.
+Future<void> _importFromIdm(BuildContext context, WidgetRef ref, S s) async {
+  final ctrl = TextEditingController();
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(s.importFromIdm),
+      content: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(s.importFromIdmHint, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              maxLines: 10,
+              decoration: InputDecoration(hintText: s.pasteIdmExport, alignLabelWithHint: true),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(s.cancel)),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(s.importFromIdm)),
+      ],
+    ),
+  );
+  if (ok != true || ctrl.text.trim().isEmpty) return;
+  final (imported, duplicates) = await ref.read(prov.tasksProvider.notifier).importIdm(ctrl.text);
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(s.importResult.replaceFirst('{i}', '$imported').replaceFirst('{d}', '$duplicates')),
+    ));
+  }
+}
+
+/// Shared section card used across the settings page (method `_section` delegates here).
+Widget sectionCard(BuildContext context, IconData icon, String title, List<Widget> children) {
+  return _SettingsSectionCard(icon: icon, title: title, children: children);
+}
+
+class _SettingsSectionCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final List<Widget> children;
+  const _SettingsSectionCard({required this.icon, required this.title, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(width: 10),
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                ],
+              ),
+              const SizedBox(height: 14),
+              ...children,
             ],
           ),
         ),

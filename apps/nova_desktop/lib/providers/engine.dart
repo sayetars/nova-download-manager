@@ -261,6 +261,16 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
   Future<void> cancel(String key) => _cmd('cancel_task', key);
   Future<void> retry(String key) => _cmd('retry_task', key);
 
+  Future<void> pauseAll() => _all('pause_all');
+  Future<void> resumeAll() => _all('resume_all');
+
+  Future<void> _all(String type) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return;
+    await engine.call(type);
+    await refresh();
+  }
+
   Future<void> openFile(String key) async {
     final engine = ref.read(engineProvider);
     if (engine == null) return;
@@ -305,6 +315,28 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
     if (engine == null) return;
     await engine.call('clear_completed');
     await _load();
+  }
+
+  /// IDM parity v1.2.0 — best-effort import from an IDM export (.ief/.ef2 or URL list).
+  /// Returns (imported, duplicates).
+  Future<(int, int)> importIdm(String content, {bool autoStart = false}) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return (0, 0);
+    final resp = await engine.call('import_idm', {
+      'content': content,
+      'auto_start': autoStart,
+    });
+    await _load();
+    return ((resp['imported'] ?? 0) as int, (resp['duplicates'] ?? 0) as int);
+  }
+
+  /// IDM parity v1.2.0 — run a sync rule now; returns (added, unchanged).
+  Future<(int, int)> runSync(int ruleId) async {
+    final engine = ref.read(engineProvider);
+    if (engine == null) return (0, 0);
+    final resp = await engine.call('run_sync', {'id': ruleId, 'force': true});
+    await _load();
+    return ((resp['added'] ?? 0) as int, (resp['unchanged'] ?? 0) as int);
   }
 }
 
@@ -383,3 +415,58 @@ final schedulesProvider = FutureProvider.autoDispose<List<ScheduleRuleUi>>((ref)
       .map((e) => ScheduleRuleUi.fromJson((e as Map).cast<String, dynamic>()))
       .toList();
 });
+
+/// Sync rules (IDM parity v1.2.0 — periodic re-download of changed URLs).
+final syncRulesProvider = FutureProvider.autoDispose<List<SyncRuleUi>>((ref) async {
+  final engine = ref.watch(engineProvider);
+  if (engine == null) return [];
+  final resp = await engine.call('list_sync_rules');
+  return (resp['rules'] as List)
+      .map((e) => SyncRuleUi.fromJson((e as Map).cast<String, dynamic>()))
+      .toList();
+});
+
+/// Downloads-list sorting (IDM parity v1.2.0 — sortable columns).
+enum SortField { added, name, size, progress, state, speed }
+
+class SortMode {
+  final SortField field;
+  final bool ascending;
+  const SortMode(this.field, {this.ascending = false});
+
+  SortMode toggled(SortField f) =>
+      f == field ? SortMode(f, ascending: !ascending) : SortMode(f, ascending: false);
+
+  List<TaskUi> apply(List<TaskUi> list) {
+    int cmp(TaskUi a, TaskUi b) {
+      switch (field) {
+        case SortField.name:
+          return a.fileName.toLowerCase().compareTo(b.fileName.toLowerCase());
+        case SortField.size:
+          return (a.totalBytes < 0 ? 1 << 40 : a.totalBytes)
+              .compareTo(b.totalBytes < 0 ? 1 << 40 : b.totalBytes);
+        case SortField.progress:
+          return a.progress.compareTo(b.progress);
+        case SortField.state:
+          return a.state.compareTo(b.state);
+        case SortField.speed:
+          return a.speedBps.compareTo(b.speedBps);
+        case SortField.added:
+          return a.createdAtMs.compareTo(b.createdAtMs);
+      }
+    }
+
+    final sorted = [...list]..sort(cmp);
+    return ascending ? sorted : sorted.reversed.toList();
+  }
+}
+
+class SortModeNotifier extends Notifier<SortMode> {
+  @override
+  SortMode build() => const SortMode(SortField.added, ascending: false);
+
+  void toggle(SortField f) => state = state.toggled(f);
+}
+
+final sortModeProvider = NotifierProvider<SortModeNotifier, SortMode>(SortModeNotifier.new);
+

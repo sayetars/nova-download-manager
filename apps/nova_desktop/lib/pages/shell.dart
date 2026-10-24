@@ -28,6 +28,7 @@ enum NavSection {
   media,
   queues,
   scheduler,
+  sync,
   grabber,
   browser,
   history,
@@ -113,6 +114,10 @@ class _ShellPageState extends ConsumerState<ShellPage> {
 
   void _onTaskCompleted(TaskUi t) {
     if (!mounted) return;
+    // IDM parity v1.2.0 — completion-dialog customization: always | media | never.
+    final mode = ref.read(prov.settingsProvider)['ui.complete_dialog'] ?? 'always';
+    if (mode == 'never') return;
+    if (mode == 'media' && t.kind == 'file') return;
     _playDoneSound();
     final s = S.of(context);
     showDialog(
@@ -235,6 +240,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       const _NavItem(null, null, null, '', null), // spacer
       _NavItem(NavSection.queues, Icons.account_tree_outlined, Icons.account_tree, s.queues, null),
       _NavItem(NavSection.scheduler, Icons.alarm_outlined, Icons.alarm, s.scheduler, null),
+      _NavItem(NavSection.sync, Icons.sync_outlined, Icons.sync, s.syncRules, null),
       _NavItem(NavSection.grabber, Icons.travel_explore_outlined, Icons.travel_explore, s.grabber, null),
       _NavItem(NavSection.browser, Icons.extension_outlined, Icons.extension, s.browserIntegration, null),
       _NavItem(NavSection.history, Icons.history_outlined, Icons.history, s.history, null),
@@ -375,6 +381,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
         NavSection.media => s.mediaDownloads,
         NavSection.queues => s.queues,
         NavSection.scheduler => s.scheduler,
+        NavSection.sync => s.syncRules,
         NavSection.grabber => s.grabber,
         NavSection.browser => s.browserIntegration,
         NavSection.history => s.history,
@@ -417,8 +424,26 @@ class _ShellPageState extends ConsumerState<ShellPage> {
           const SizedBox(width: 10),
           _speedLimitButton(s),
           const SizedBox(width: 10),
+          _miniWindowButton(s),
+          const SizedBox(width: 10),
           _connectionChip(s, connected, globalSpeed),
         ],
+      ),
+    );
+  }
+
+  /// IDM parity v1.2.0 — progress mini-window: a second always-on-top instance.
+  Widget _miniWindowButton(S s) {
+    return Tooltip(
+      message: s.miniWindow,
+      child: IconButton(
+        onPressed: () async {
+          try {
+            final exe = Platform.resolvedExecutable;
+            await Process.start(exe, ['--mini'], mode: ProcessStartMode.detached);
+          } catch (_) {/* best effort */}
+        },
+        icon: const Icon(Icons.picture_in_picture_alt_rounded, size: 20),
       ),
     );
   }
@@ -502,6 +527,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       NavSection.overview => OverviewPage(search: _search),
       NavSection.queues => const QueuesPage(),
       NavSection.scheduler => const SchedulerPage(),
+      NavSection.sync => const SyncRulesPage(),
       NavSection.grabber => const GrabberPage(),
       NavSection.browser => const BrowserIntegrationPage(),
       NavSection.history => HistoryPage(search: _search),

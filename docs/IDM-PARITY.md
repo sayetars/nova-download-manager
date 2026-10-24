@@ -1,6 +1,6 @@
 # IDM Feature-Parity Gap Analysis
 
-> Date: 2026-10-24 · Baseline audited: **Nova v1.0.1** (Linux-verified release) — **updated 2026-10-24 for v1.1.0 (IDM Parity Core + Plus): matrix rows re-verified against code; P0 items 1–12 complete, P1 items 13–19 complete.**
+> Date: 2026-10-24 · Baseline audited: **Nova v1.0.1** (Linux-verified release) — **updated for v1.1.0 (P0 1–12 + P1 13–19) and v1.2.0 (P2 complete: per-server caps #14, special keys #23, queue scheduling #26, sync queues #28, sortable columns #36, mini-window #44). Remaining PARTIAL rows are deliberate design trade-offs (§8) or platform-scoped.**
 > Purpose: complete, verified inventory of what Internet Download Manager (IDM) offers vs. what Nova has today, and the roadmap to full parity. This document is the working backlog for the parity phases.
 
 Research sources: official `internetdownloadmanager.com` pages (features2.html, support/options.html, support/idm-grabber.html, support/command_line.html, video FAQ), askvg.com IDM panel guide, dealarious.com "10+ bonus features" guide, softonic/sourceforge reviews — cross-checked against a direct code audit of this repository (engine sources, Flutter pages, extension sources, docs/, STATE.md).
@@ -39,7 +39,7 @@ Status legend: **HAVE** (implemented & verified) · **PARTIAL** (exists but inco
 | 11 | One-click browser takeover | **PARTIAL** | Interception exists but opt-in (see §8) |
 | 12 | Drag & drop link/file onto window | **HAVE** (v1.1.0) | Win32 WM_DROPFILES + GTK drag-dest → method channel `nova/dnd` → Add dialog prefill (single or batch) |
 | 13 | Per-download properties editor (URL, referer, UA, auth, path, speed limit, priority, start time) | **HAVE** (v1.1.0) | Task Properties dialog: queue, category, priority, connections, speed cap, start-at, post action, mirrors (`update_task` IPC) |
-| 14 | Per-server connection-count exceptions | **MISSING** | Planned v1.2.x |
+| 14 | Per-server connection-count exceptions | **HAVE** (v1.2.0) | `scheduler.per_server_max` default + `scheduler.server_exceptions` JSON overrides (wildcards), enforced in scheduler admission (`PerServerPolicy`, tested) |
 | 15 | Download later / scheduled single-task start | **HAVE** (v1.1.0) | Add dialog start-at + task properties editor start-at; scheduler honors `StartAtMs` (tested) |
 
 ### 2.2 Browser integration
@@ -53,7 +53,7 @@ Status legend: **HAVE** (implemented & verified) · **PARTIAL** (exists but inco
 | 20 | Download panel for selected links (multi-select) | **HAVE** (v1.1.0) | Multi-select link dialog in extension → batch `add_downloads` |
 | 21 | File-types takeover editor | **HAVE** (v1.1.0) | `intercept.file_types` setting + settings UI field (drives extension interception) |
 | 22 | Site exceptions with wildcards (`*.tonec.com`) | **HAVE** (v1.1.0) | `UrlPatterns.WildcardMatch` (tested) + allow/blocklist + file-type scoping via `intercept.file_types` |
-| 23 | Special keys to force/prevent interception | **MISSING** | Planned v1.2.x |
+| 23 | Special keys to force/prevent interception | **HAVE** (v1.2.0) | Extension options: interceptKey (alt/ctrl/shift/none) forces "download with Nova" on click; preventKey suppresses overlay + interception while held (both browsers, options page included) |
 | 24 | URL clipboard monitoring (+ auto-add copied links) | **HAVE** (v1.1.0) | 2 s watcher prefills the Add dialog (never silent) + ignore-list of seen clips |
 | 25 | Advanced integration into any HTTP/FTP app | **EXCLUDED** | Modern equivalent is the extension route (§8) |
 
@@ -61,9 +61,9 @@ Status legend: **HAVE** (implemented & verified) · **PARTIAL** (exists but inco
 
 | # | IDM capability | Nova v1.0.1 | Notes |
 |---|---|---|---|
-| 26 | Scheduler (start at set time, one-time/recurring) | **PARTIAL** | Time-window rules exist; no start/stop scheduling of queues |
+| 26 | Scheduler (start at set time, one-time/recurring) | **HAVE** (v1.2.0) | Global time-window rules + per-queue start/stop schedule windows ("run"/"pause" entries, overnight windows, `QueueSchedule`, tested) |
 | 27 | Multiple named queues | **HAVE** | QueueName + per-queue caps |
-| 28 | Periodic synchronization queues (re-download) | **MISSING** | Planned v1.2.x (conditional on ETag/Last-Modified) |
+| 28 | Periodic synchronization queues (re-download) | **HAVE** (v1.2.0) | `sync_rule` table + `SyncService`: HEAD (ranged-GET fallback) ETag/Last-Modified comparison, interval gating, run-now IPC, dedicated UI page (tested incl. interval/disabled/405 paths) |
 | 29 | Hang up / shut down PC when done | **HAVE** (v1.1.0) | `PostActionRunner`: exit / shutdown / hibernate / sleep / logoff with cancel window; per-task + engine-wide settings |
 | 30 | "Download later" → queue | **HAVE** (v1.1.0) | Queue picker in task properties editor; queue assignment on add via IPC `queue_name` |
 | 31 | Speed limiter (on-the-fly global throttle) | **HAVE** (v1.1.0) | Toolbar quick toggle (presets → `engine.global_speed_cap`, applied live) |
@@ -76,7 +76,7 @@ Status legend: **HAVE** (implemented & verified) · **PARTIAL** (exists but inco
 |---|---|---|---|
 | 34 | Download categories (built-in + custom) | **HAVE** (v1.1.0) | Auto-assign + icons + filter + custom categories with patterns (settings editor, `category_def` table) |
 | 35 | Per-category save dirs + "change on last selected" | **HAVE** (v1.1.0) | `destination_dir` per category def (change-on-last-selected remains a P2 nicety) |
-| 36 | Sortable columns + find in list | **PARTIAL** | Search by name/URL; no column sorting |
+| 36 | Sortable columns + find in list | **HAVE** (v1.2.0) | Search by name/URL + sort menu (date added/name/size/progress/state/speed, asc/desc toggle) in the downloads list |
 | 37 | Toolbar/skins customization | **EXCLUDED** | M3 design system is the deliberate replacement |
 | 38 | Dark theme | **HAVE** | light/dark/system |
 | 39 | Multilingual (40+ incl. Farsi) | **PARTIAL** | EN/FA by design; more languages later |
@@ -84,7 +84,7 @@ Status legend: **HAVE** (implemented & verified) · **PARTIAL** (exists but inco
 | 41 | Progress dialog with speed graph + segment view | **HAVE** (v1.1.0) | Details sheet: stacked per-segment bars (`task_segments` IPC, 500 ms live publish) + speed graph painter |
 | 42 | Download-complete dialog (open/run/etc.) | **HAVE** (v1.1.0) | Complete dialog with open-file action + sound |
 | 43 | Tray icon / minimize to tray | **PARTIAL** | Setting exists; Linux tray not shipped (KNOWN-LIMITATIONS #8) |
-| 44 | Progress mini-window (always-on-top) | **MISSING** | — |
+| 44 | Progress mini-window (always-on-top) | **HAVE** (v1.2.0) | Second `--mini` instance: compact always-on-top window (GTK keep-above / Win32 HWND_TOPMOST), global speed + per-task rows + pause/resume all; launched from the toolbar (VLM-verified screenshot) |
 
 ### 2.5 Special tools & post-download
 

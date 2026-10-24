@@ -330,6 +330,20 @@ public sealed class DownloadEngine : IAsyncDisposable
 
     public int ActiveCount => _tasks.Values.Count(e => e.Runner is not null);
 
+    /// <summary>Running tasks per normalized host (per-server cap admission input).</summary>
+    public IReadOnlyDictionary<string, int> ActivePerHost()
+    {
+        var dict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in _tasks.Values)
+        {
+            if (e.Runner is null) continue;
+            var host = UrlHost.Of(e.Task.EffectiveUrl ?? e.Task.Url);
+            if (host.Length == 0) continue;
+            dict[host] = dict.GetValueOrDefault(host, 0) + 1;
+        }
+        return dict;
+    }
+
     public long GlobalSpeedBps => _tasks.Values
         .Where(e => e.Runner is not null)
         .Sum(e => e.Runner!.Speed.SpeedBps);

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Nova — assemble the Linux x64 release tarball (v1.1.0).
+# Nova — assemble the Linux x64 release tarball (v1.2.0).
 # Mirrors the v1.0.1 layout: bundle/ (flutter + FDD engine + browserhost),
 # engine-self-contained/, extensions/, docs/, launcher scripts, SHA256SUMS.
 set -euo pipefail
 ROOT=/home/z/my-project
-VER=1.1.0
+VER=1.2.0
 NAME="nova-dm-${VER}-linux-x64"
 STAGE="$ROOT/download/stage-$NAME"
 OUT="$ROOT/download/$NAME.tar.gz"
@@ -17,7 +17,8 @@ mkdir -p "$PKG/bundle" "$PKG/engine-self-contained" "$PKG/extensions" "$PKG/docs
 cp -r "$ROOT/apps/nova_desktop/build/linux/x64/release/bundle/." "$PKG/bundle/"
 
 # 2) FDD engine files → bundle root (UI auto-spawns ./NovaEngine)
-cp "$ROOT"/publish/engine/* "$PKG/bundle/"
+#    (files only: the runtimes/ RID tree is skipped — top-level libe_sqlite3.so resolves)
+find "$ROOT/publish/engine" -maxdepth 1 -type f -exec cp {} "$PKG/bundle/" \;
 
 # 3) FDD browser host files → bundle root (native-messaging manifest points here)
 cp "$ROOT"/publish/browserhost/* "$PKG/bundle/"

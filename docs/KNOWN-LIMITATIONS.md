@@ -24,6 +24,8 @@ This repository was **built and tested on Linux** (.NET 8.0.426 + Flutter 3.47.7
 6. **HTTP Basic/Digest auth** is not stored by the engine; 401/403 surfaces as an auth error for the user to resolve (no credential prompt yet).
 7. **No BitTorrent / FTP / SFTP** — v1 is HTTP(S)-focused.
 8. **Flutter tray/minimize-to-tray** was not shipped with a package dependency (the chosen tray packages required GTK dev headers at test time on the sandbox's Linux); the Windows runner integration is the planned home for tray support — currently closing the window exits the UI while the engine keeps downloading.
+9. **Windows mini-window runner code (v1.2.0)** — `windows/runner/main.cpp` detects `--mini` and applies `HWND_TOPMOST` + `WS_EX_TOOLWINDOW`; as with the v1.1.0 DnD bridge, this is structurally complete but **not compiled here** (no MSVC). The Linux equivalent is compiled, smoke-tested and VLM-verified.
+10. **Extension special keys are modifier-only** (alt/ctrl/shift) — modifiers are directly observable on click events; a configurable non-modifier key (e.g. Insert, IDM's default) would require stricter page key-capture permissions and was not taken.
 9. **Single-user machine trust model**: any process of the *same* OS account can connect to the engine (same-account compromise is out of scope; different accounts are blocked by ACL + token).
 10. **Video-detection coverage** is verified for MP4/HLS/DASH test fixtures; the general claim is limited to "sites whose players expose standard media elements or network-visible segments" — no 100% detection promise.
 11. **Extension store publishing** is not done (requires developer accounts + signed packages). Dev-mode loading is fully supported and documented.

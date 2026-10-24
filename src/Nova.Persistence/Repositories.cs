@@ -94,7 +94,7 @@ public sealed class QueueRepository : IQueueRepository
         lock (_db.Connection)
         using (var cmd = _db.Connection.CreateCommand())
         {
-            cmd.CommandText = "SELECT name, kind, max_concurrent, speed_cap_bytes, destination_dir FROM download_queue ORDER BY name";
+            cmd.CommandText = "SELECT name, kind, max_concurrent, speed_cap_bytes, destination_dir, schedule_json FROM download_queue ORDER BY name";
             using var r = cmd.ExecuteReader();
             var list = new List<DownloadQueueInfo>();
             while (r.Read())
@@ -105,6 +105,7 @@ public sealed class QueueRepository : IQueueRepository
                     MaxConcurrent = r.GetInt32(2),
                     SpeedCapBytes = r.GetInt64(3),
                     DestinationDir = r.GetString(4),
+                    ScheduleJson = r.IsDBNull(5) ? string.Empty : r.GetString(5),
                 });
             return list;
         }
@@ -125,17 +126,19 @@ public sealed class QueueRepository : IQueueRepository
         using (var cmd = _db.Connection.CreateCommand())
         {
             cmd.CommandText = """
-                INSERT INTO download_queue(name, kind, max_concurrent, speed_cap_bytes, destination_dir)
-                VALUES(@n,@k,@m,@s,@d)
+                INSERT INTO download_queue(name, kind, max_concurrent, speed_cap_bytes, destination_dir, schedule_json)
+                VALUES(@n,@k,@m,@s,@d,@j)
                 ON CONFLICT(name) DO UPDATE SET
                     kind=excluded.kind, max_concurrent=excluded.max_concurrent,
-                    speed_cap_bytes=excluded.speed_cap_bytes, destination_dir=excluded.destination_dir
+                    speed_cap_bytes=excluded.speed_cap_bytes, destination_dir=excluded.destination_dir,
+                    schedule_json=excluded.schedule_json
                 """;
             cmd.Parameters.AddValue("@n", q.Name);
             cmd.Parameters.AddValue("@k", (int)q.Kind);
             cmd.Parameters.AddValue("@m", q.MaxConcurrent);
             cmd.Parameters.AddValue("@s", q.SpeedCapBytes);
             cmd.Parameters.AddValue("@d", q.DestinationDir ?? string.Empty);
+            cmd.Parameters.AddValue("@j", q.ScheduleJson ?? string.Empty);
             cmd.ExecuteNonQuery();
         }
     }
@@ -191,6 +194,168 @@ public sealed class SettingsRepository : ISettingsRepository
             var dict = new Dictionary<string, string>();
             while (r.Read()) dict[r.GetString(0)] = r.GetString(1);
             return dict;
+        }
+    }
+}
+
+/// <summary>Sync-rule persistence (IDM parity: periodic synchronization queues).</summary>
+public sealed class SyncRuleRepository : ISyncRuleRepository
+{
+    private readonly NovaDatabase _db;
+    public SyncRuleRepository(NovaDatabase db) => _db = db;
+
+    public IReadOnlyList<SyncRule> GetAll()
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT id, name, urls, destination_dir, category, interval_minutes, enabled, last_run_ms FROM sync_rule ORDER BY id";
+            using var r = cmd.ExecuteReader();
+            var list = new List<SyncRule>();
+            while (r.Read())
+                list.Add(new SyncRule
+                {
+                    Id = r.GetInt64(0),
+                    Name = r.GetString(1),
+                    Urls = r.GetString(2),
+                    DestinationDir = r.GetString(3),
+                    Category = r.GetString(4),
+                    IntervalMinutes = r.GetInt32(5),
+                    Enabled = r.GetInt32(6) != 0,
+                    LastRunMs = r.GetInt64(7),
+                });
+            return list;
+        }
+    }
+
+    public SyncRule? Get(long id)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT id, name, urls, destination_dir, category, interval_minutes, enabled, last_run_ms FROM sync_rule WHERE id=@i";
+            cmd.Parameters.AddValue("@i", id);
+            using var r = cmd.ExecuteReader();
+            if (!r.Read()) return null;
+            return new SyncRule
+            {
+                Id = r.GetInt64(0),
+                Name = r.GetString(1),
+                Urls = r.GetString(2),
+                DestinationDir = r.GetString(3),
+                Category = r.GetString(4),
+                IntervalMinutes = r.GetInt32(5),
+                Enabled = r.GetInt32(6) != 0,
+                LastRunMs = r.GetInt64(7),
+            };
+        }
+    }
+
+    public long Insert(SyncRule rule)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = """
+                INSERT INTO sync_rule(name, urls, destination_dir, category, interval_minutes, enabled, last_run_ms)
+                VALUES(@n,@u,@d,@c,@i,@e,@l)
+                """;
+            Bind(cmd, rule);
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = "SELECT last_insert_rowid()";
+            return Convert.ToInt64(cmd.ExecuteScalar()!);
+        }
+    }
+
+    public void Update(SyncRule rule)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = """
+                UPDATE sync_rule SET name=@n, urls=@u, destination_dir=@d, category=@c,
+                    interval_minutes=@i, enabled=@e, last_run_ms=@l WHERE id=@i2
+                """;
+            Bind(cmd, rule);
+            cmd.Parameters.AddValue("@i2", rule.Id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    private static void Bind(Microsoft.Data.Sqlite.SqliteCommand cmd, SyncRule rule)
+    {
+        cmd.Parameters.AddValue("@n", rule.Name ?? string.Empty);
+        cmd.Parameters.AddValue("@u", rule.Urls ?? string.Empty);
+        cmd.Parameters.AddValue("@d", rule.DestinationDir ?? string.Empty);
+        cmd.Parameters.AddValue("@c", rule.Category ?? "other");
+        cmd.Parameters.AddValue("@i", rule.IntervalMinutes);
+        cmd.Parameters.AddValue("@e", rule.Enabled ? 1 : 0);
+        cmd.Parameters.AddValue("@l", rule.LastRunMs);
+    }
+
+    public void Delete(long id)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "DELETE FROM sync_rule WHERE id=@i";
+            cmd.Parameters.AddValue("@i", id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public void SetLastRun(long id, long atMs)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "UPDATE sync_rule SET last_run_ms=@m WHERE id=@i";
+            cmd.Parameters.AddValue("@m", atMs);
+            cmd.Parameters.AddValue("@i", id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public IReadOnlyDictionary<string, (string? ETag, string? LastModified)> GetValidators(long ruleId)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT url, etag, last_modified FROM sync_state WHERE rule_id=@r";
+            cmd.Parameters.AddValue("@r", ruleId);
+            using var r = cmd.ExecuteReader();
+            var dict = new Dictionary<string, (string?, string?)>(StringComparer.OrdinalIgnoreCase);
+            while (r.Read())
+                dict[r.GetString(0)] = (r.IsDBNull(1) ? null : r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2));
+            return dict;
+        }
+    }
+
+    public void SaveValidator(long ruleId, string url, string? etag, string? lastModified)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = """
+                INSERT INTO sync_state(rule_id, url, etag, last_modified) VALUES(@r,@u,@e,@m)
+                ON CONFLICT(rule_id, url) DO UPDATE SET etag=excluded.etag, last_modified=excluded.last_modified
+                """;
+            cmd.Parameters.AddValue("@r", ruleId);
+            cmd.Parameters.AddValue("@u", url);
+            cmd.Parameters.AddValue("@e", (object?)etag ?? DBNull.Value);
+            cmd.Parameters.AddValue("@m", (object?)lastModified ?? DBNull.Value);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public void ForgetRule(long ruleId)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "DELETE FROM sync_state WHERE rule_id=@r";
+            cmd.Parameters.AddValue("@r", ruleId);
+            cmd.ExecuteNonQuery();
         }
     }
 }

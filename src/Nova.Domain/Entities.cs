@@ -132,6 +132,8 @@ public sealed class DownloadQueueInfo
     public int MaxConcurrent { get; set; }
     public long SpeedCapBytes { get; set; }
     public string DestinationDir { get; set; } = string.Empty;
+    /// <summary>Per-queue schedule JSON (QueueScheduleRule[]); empty = always allowed.</summary>
+    public string ScheduleJson { get; set; } = string.Empty;
     public int ActiveCount { get; set; }
     public int WaitingCount { get; set; }
     public int TotalCount { get; set; }
@@ -150,3 +152,33 @@ public sealed class SchedulerRule
     /// <summary>Apply speed cap while active.</summary>
     public long SpeedCapBytes { get; set; }
 }
+
+/// <summary>Per-queue start/stop schedule entry (IDM parity: queue scheduling).</summary>
+public sealed class QueueScheduleRule
+{
+    /// <summary>"run" = queue may only run inside the window; "pause" = queue must not run inside it.</summary>
+    public string Action { get; set; } = "pause";
+    public string DaysOfWeek { get; set; } = string.Empty;
+    public string StartTime { get; set; } = "00:00";
+    public string EndTime { get; set; } = "23:59";
+    public bool Enabled { get; set; } = true;
+}
+
+/// <summary>Periodic synchronization rule (IDM parity: sync queues) — re-downloads changed URLs.</summary>
+public sealed class SyncRule
+{
+    public long Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    /// <summary>One URL per line.</summary>
+    public string Urls { get; set; } = string.Empty;
+    public string DestinationDir { get; set; } = string.Empty;
+    public string Category { get; set; } = "other";
+    /// <summary>Minimum minutes between automatic runs.</summary>
+    public int IntervalMinutes { get; set; } = 60;
+    public bool Enabled { get; set; } = true;
+    /// <summary>Epoch-ms of the last completed run (0 = never).</summary>
+    public long LastRunMs { get; set; }
+}
+
+/// <summary>Result of one synchronization run.</summary>
+public sealed record SyncRunResult(long RuleId, int Checked, int Added, int Unchanged, int Failed);

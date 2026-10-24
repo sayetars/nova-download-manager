@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<title>Nova Download Manager — Options</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 14px/1.55 system-ui, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0;
+         max-width: 620px; margin: 0 auto; padding: 22px 18px 40px; }
+  h1 { font-size: 17px; display: flex; align-items: center; gap: 10px; margin: 0 0 4px; }
+  h1 .dot { width: 12px; height: 12px; border-radius: 50%; background: #2563eb; display: inline-block; }
+  .sub { color: #94a3b8; font-size: 12.5px; margin-bottom: 20px; }
+  section { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+  h2 { font-size: 13px; margin: 0 0 10px; color: #93c5fd; font-weight: 600; }
+  label { display: flex; align-items: center; gap: 10px; padding: 6px 0; cursor: pointer; }
+  label span.grow { flex: 1; }
+  small { color: #94a3b8; display: block; margin-top: 6px; }
+  select, input[type="text"], textarea { background: #0f172a; color: #e2e8f0; border: 1px solid #334155;
+    border-radius: 8px; padding: 7px 10px; font: inherit; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 74px; resize: vertical; }
+  .row { display: flex; gap: 10px; align-items: center; padding: 6px 0; }
+  .row select { min-width: 110px; }
+  .status { position: fixed; bottom: 16px; right: 16px; background: #16a34a; color: #fff;
+    padding: 8px 16px; border-radius: 999px; font-size: 12.5px; opacity: 0; transition: opacity .3s; }
+  .status.show { opacity: 1; }
+</style>
+</head>
+<body>
+<h1><span class="dot"></span> Nova Download Manager</h1>
+<div class="sub">Options are synced with your browser profile.</div>
+
+<section>
+  <h2>General</h2>
+  <label><input type="checkbox" id="enabled"><span class="grow">Enabled — show download buttons and context menus</span></label>
+  <label><input type="checkbox" id="showOnHover"><span class="grow">Show video overlay on hover</span></label>
+  <label><input type="checkbox" id="interceptDownloads"><span class="grow">Take over browser downloads (opt-in)</span></label>
+  <div class="row">
+    <span style="min-width:170px">Preferred video quality</span>
+    <select id="preferredQuality">
+      <option value="ask">Ask every time</option>
+      <option value="best">Best available</option>
+      <option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option>
+    </select>
+  </div>
+</section>
+
+<section>
+  <h2>Special keys (IDM parity)</h2>
+  <div class="row">
+    <span style="min-width:170px">Force-download key</span>
+    <select id="interceptKey">
+      <option value="alt">Alt — hold + click a link</option>
+      <option value="ctrl">Ctrl — hold + click a link</option>
+      <option value="shift">Shift — hold + click a link</option>
+      <option value="none">Disabled</option>
+    </select>
+  </div>
+  <small>Hold this key while clicking a link to hand it to Nova instead of the browser.</small>
+  <div class="row">
+    <span style="min-width:170px">Prevent key</span>
+    <select id="preventKey">
+      <option value="none">Disabled</option>
+      <option value="alt">Alt</option>
+      <option value="ctrl">Ctrl</option>
+      <option value="shift">Shift</option>
+    </select>
+  </div>
+  <small>While this key is held, the Nova overlay and click interception are suppressed.</small>
+</section>
+
+<section>
+  <h2>Site lists</h2>
+  <label><span class="grow">Allowlist (hosts, one per line — empty = all sites)</span></label>
+  <textarea id="allowlist" placeholder="example.com&#10;*.cdn.example.org"></textarea>
+  <label><span class="grow">Blocklist (hosts, one per line)</span></label>
+  <textarea id="blocklist" placeholder="ads.example.com"></textarea>
+</section>
+
+<div class="status" id="status">Saved</div>
+<script src="options.js"></script>
+</body>
+</html>

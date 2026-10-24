@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nova Download Manager",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Hand downloads and supported videos to Nova Download Manager — quality picker included.",
   "permissions": [
     "contextMenus",
@@ -11,15 +11,23 @@
     "downloads",
     "nativeMessaging"
   ],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     }
@@ -38,5 +46,9 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
   }
 }

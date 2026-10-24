@@ -2,6 +2,36 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [1.2.0] — 2026-10-24
+
+**IDM Parity Polish (P2 complete)** — every remaining P2 gap from `docs/IDM-PARITY.md` is implemented. C# suite grew 81 → 108 tests; all Linux verification green (smoke, parity E2E 12/12, mini-window smoke + VLM QA, UI VLM QA, tarball clean-env byte-exact).
+
+### Added — engine
+- **Per-server connection caps** (IDM #14): default `scheduler.per_server_max` plus per-host exception overrides with wildcards (`scheduler.server_exceptions`), enforced in scheduler admission via `ActivePerHost()` + `PerServerPolicy` (tested; case-insensitive JSON, malformed-input safe).
+- **Per-queue start/stop scheduling** (IDM #26): queue-level schedule windows — "run" windows (queue may only run inside) and "pause" windows (never run inside), day-of-week + overnight support; persisted on `download_queue.schedule_json`; `save_queue` accepts `schedule_json` (tested incl. pause-beats-run, disabled rules).
+- **Periodic synchronization queues** (IDM #28): `sync_rule`/`sync_state` tables (migration v6), `SyncService` with 30 s due-check timer, HEAD probes (ranged-GET fallback on 405/501), ETag/Last-Modified change detection, interval gating, `list_sync_rules` / `save_sync_rule` / `delete_sync_rule` / `run_sync` IPC (tested: first-run adds, unchanged skip, changed re-add, 405 fallback, interval + disabled gating).
+- **IDM import** (best-effort): `import_idm` IPC extracts URLs from .ief/.ef2-style exports or plain lists (regex, dedupe, punctuation-trim) and batch-adds as paused (tested).
+- `per_server_overview` IPC (active per host + configured caps).
+
+### Added — UI (Flutter)
+- **Progress mini-window** (IDM #44): second `--mini` process — compact 340×460 always-on-top window (GTK `gtk_window_set_keep_above` / Win32 `HWND_TOPMOST` + `WS_EX_TOOLWINDOW`), global speed header, per-task rows with progress, pause/resume all; `nova/window` method channel; launched from the toolbar.
+- **Sort menu** in the downloads list (IDM #36): date added / name / size / progress / state / speed with direction toggle.
+- **Sync rules page** (new sidebar section): list / add / edit / enable / delete / run-now with result toast.
+- **Queue schedule editor**: per-queue run/pause windows with day chips, shown as chips on queue cards.
+- **Settings**: per-server caps section (default + exceptions editor), complete-dialog customization (`ui.complete_dialog` = always / media / never, honored by the shell dialog).
+- **IDM import button** (settings → import/export): paste-dialog → `import_idm`.
+
+### Changed — extensions (both browsers)
+- **Special keys** (IDM #23): configurable force-download key (alt/ctrl/shift/none — default alt) and prevent key (suppresses overlay + interception while held); new **options page** (`options_ui`) with all settings incl. quality preference and allow/block lists; manifests bumped 1.2.0.
+
+### Changed — platform
+- SQLite migration v6 (`sync_rule`, `sync_state`, `download_queue.schedule_json`).
+- Engine + IPC version strings → 1.2.0; `EngineStatusResponse.EngineVersion` 1.2.0.
+
+### Verified
+- `dotnet test` 108/108 (×2 consecutive runs) · `flutter analyze` 0 errors · `flutter test` 8/8 · smoke_test PASS · parity E2E 12/12 · mini-window smoke + VLM QA PASS · main UI VLM QA PASS · tarball clean-env byte-exact PASS.
+- Windows runner mini-window code follows the v1.1.0 DnD pattern (structurally complete, compile-verification pending a Windows host — KNOWN-LIMITATIONS).
+
 ## [1.1.0] — 2026-10-24
 
 **IDM Parity Core + Plus** — the P0 gap list from `docs/IDM-PARITY.md` is now implemented, with most P1 items included. C# suite grew 43 → 81 tests; parity E2E smoke 12/12 PASS on the shipped bits.

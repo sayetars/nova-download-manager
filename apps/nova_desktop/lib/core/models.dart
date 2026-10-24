@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../core/protocol.dart';
 
 /// Immutable UI-side snapshot of a download task (mirrors TaskSnapshot in C#).
@@ -186,6 +188,7 @@ class QueueUi {
   final int maxConcurrent;
   final int speedCapBytes;
   final String destinationDir;
+  final String scheduleJson;
   final int activeCount;
   final int waitingCount;
   final int totalCount;
@@ -195,6 +198,7 @@ class QueueUi {
     this.maxConcurrent = 0,
     this.speedCapBytes = 0,
     this.destinationDir = '',
+    this.scheduleJson = '',
     this.activeCount = 0,
     this.waitingCount = 0,
     this.totalCount = 0,
@@ -205,10 +209,100 @@ class QueueUi {
         maxConcurrent: (j['max_concurrent'] ?? 0) as int,
         speedCapBytes: (j['speed_cap_bytes'] ?? 0) as int,
         destinationDir: (j['destination_dir'] ?? '') as String,
+        scheduleJson: (j['schedule_json'] ?? '') as String,
         activeCount: (j['active_count'] ?? 0) as int,
         waitingCount: (j['waiting_count'] ?? 0) as int,
         totalCount: (j['total_count'] ?? 0) as int,
       );
+
+  /// Parsed per-queue schedule entries (IDM parity v1.2.0).
+  List<QueueScheduleRuleUi> get schedule {
+    try {
+      final raw = scheduleJson.isEmpty ? <Object?>[] : jsonDecode(scheduleJson) as List;
+      return raw
+          .map((e) => QueueScheduleRuleUi.fromJson((e as Map).cast<String, dynamic>()))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+}
+
+/// One per-queue start/stop schedule entry ("run" window / "pause" window).
+class QueueScheduleRuleUi {
+  final String action; // run | pause
+  final String daysOfWeek; // "" = every day; comma list of 0..6
+  final String startTime;
+  final String endTime;
+  final bool enabled;
+
+  const QueueScheduleRuleUi({
+    this.action = 'pause',
+    this.daysOfWeek = '',
+    this.startTime = '00:00',
+    this.endTime = '23:59',
+    this.enabled = true,
+  });
+
+  factory QueueScheduleRuleUi.fromJson(Map<String, dynamic> j) => QueueScheduleRuleUi(
+        action: (j['action'] ?? j['Action'] ?? 'pause') as String,
+        daysOfWeek: (j['days_of_week'] ?? j['DaysOfWeek'] ?? '') as String,
+        startTime: (j['start_time'] ?? j['StartTime'] ?? '00:00') as String,
+        endTime: (j['end_time'] ?? j['EndTime'] ?? '23:59') as String,
+        enabled: (j['enabled'] ?? j['Enabled'] ?? true) as bool,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'action': action,
+        'days_of_week': daysOfWeek,
+        'start_time': startTime,
+        'end_time': endTime,
+        'enabled': enabled,
+      };
+}
+
+/// One periodic synchronization rule (IDM parity v1.2.0).
+class SyncRuleUi {
+  final int id;
+  final String name;
+  final String urls;
+  final String destinationDir;
+  final String category;
+  final int intervalMinutes;
+  final bool enabled;
+  final int lastRunMs;
+
+  const SyncRuleUi({
+    required this.id,
+    this.name = '',
+    this.urls = '',
+    this.destinationDir = '',
+    this.category = 'other',
+    this.intervalMinutes = 60,
+    this.enabled = true,
+    this.lastRunMs = 0,
+  });
+
+  factory SyncRuleUi.fromJson(Map<String, dynamic> j) => SyncRuleUi(
+        id: (j['id'] ?? 0) as int,
+        name: (j['name'] ?? '') as String,
+        urls: (j['urls'] ?? '') as String,
+        destinationDir: (j['destination_dir'] ?? '') as String,
+        category: (j['category'] ?? 'other') as String,
+        intervalMinutes: (j['interval_minutes'] ?? 60) as int,
+        enabled: (j['enabled'] ?? true) as bool,
+        lastRunMs: (j['last_run_ms'] ?? 0) as int,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id == 0 ? null : id,
+        'name': name,
+        'urls': urls,
+        'destination_dir': destinationDir,
+        'category': category,
+        'interval_minutes': intervalMinutes,
+        'enabled': enabled,
+      };
 }
 
 class ScheduleRuleUi {

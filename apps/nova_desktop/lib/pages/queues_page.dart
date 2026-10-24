@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,6 +7,14 @@ import '../core/models.dart';
 import '../core/strings.dart';
 import '../core/theme.dart';
 import '../providers/engine.dart' as prov;
+
+const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const dayLabelsFa = ['ی', 'د', 'س', 'چ', 'پ', 'ج', 'ش'];
+
+String dayLabel(int d, bool isFa) => isFa ? dayLabelsFa[d] : dayLabels[d];
+String daysToText(String days, bool isFa) => days.isEmpty
+    ? ''
+    : days.split(',').map((d) => dayLabel(int.tryParse(d) ?? 0, isFa)).join(',');
 
 /// Queues manager.
 class QueuesPage extends ConsumerStatefulWidget {
@@ -101,6 +111,7 @@ class _QueueCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final s = S.of(context);
     final cs = Theme.of(context).colorScheme;
+    final isFa = Localizations.localeOf(context).languageCode == 'fa';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -144,6 +155,37 @@ class _QueueCard extends ConsumerWidget {
                   style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
                 ),
               ],
+            ),
+            if (queue.schedule.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  for (final w in queue.schedule)
+                    InputChip(
+                      avatar: Icon(
+                        w.action == 'run' ? Icons.play_arrow_rounded : Icons.block_rounded,
+                        size: 14,
+                        color: w.action == 'run' ? NovaColors.completed : NovaColors.failed,
+                      ),
+                      label: Text(
+                        '${w.action == 'run' ? s.scheduleRunWindows : s.schedulePauseWindows}: '
+                        '${w.startTime}–${w.endTime}'
+                        '${w.daysOfWeek.isEmpty ? '' : ' · ${daysToText(w.daysOfWeek, isFa)}'}',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton.icon(
+                onPressed: () => _editSchedule(context, ref, s, queue),
+                icon: const Icon(Icons.schedule_rounded, size: 16),
+                label: Text(s.queueSchedule, style: const TextStyle(fontSize: 12.5)),
+              ),
             ),
           ],
         ),
@@ -351,5 +393,380 @@ class SchedulerPage extends ConsumerWidget {
         ref.invalidate(prov.schedulesProvider);
       }
     });
+  }
+}
+
+// ---- IDM parity v1.2.0: per-queue start/stop schedules -------------------------
+
+extension _QueueScheduleEditor on _QueueCard {
+  Future<void> _editSchedule(BuildContext context, WidgetRef ref, S s, QueueUi queue) async {
+    var windows = [...queue.schedule];
+    final isFa = Localizations.localeOf(context).languageCode == 'fa';
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text('${s.queueSchedule} — ${queue.name}'),
+          content: SizedBox(
+            width: 520,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(s.queueScheduleHint, style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: windows.length,
+                    itemBuilder: (context, i) {
+                      final w = windows[i];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  SegmentedButton<String>(
+                                    segments: [
+                                      ButtonSegment(value: 'run', label: Text(s.scheduleRunWindows)),
+                                      ButtonSegment(value: 'pause', label: Text(s.schedulePauseWindows)),
+                                    ],
+                                    selected: {w.action},
+                                    onSelectionChanged: (sel) =>
+                                        setState(() => windows[i] = QueueScheduleRuleUi(
+                                              action: sel.first,
+                                              daysOfWeek: w.daysOfWeek,
+                                              startTime: w.startTime,
+                                              endTime: w.endTime,
+                                              enabled: w.enabled,
+                                            )),
+                                  ),
+                                  const Spacer(),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                                    onPressed: () => setState(() => windows.removeAt(i)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextFormField(
+                                      initialValue: w.startTime,
+                                      decoration: InputDecoration(labelText: s.startTime, isDense: true),
+                                      onChanged: (v) => windows[i] = QueueScheduleRuleUi(
+                                        action: w.action, daysOfWeek: w.daysOfWeek,
+                                        startTime: v, endTime: w.endTime, enabled: w.enabled,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: TextFormField(
+                                      initialValue: w.endTime,
+                                      decoration: InputDecoration(labelText: s.endTime, isDense: true),
+                                      onChanged: (v) => windows[i] = QueueScheduleRuleUi(
+                                        action: w.action, daysOfWeek: w.daysOfWeek,
+                                        startTime: w.startTime, endTime: v, enabled: w.enabled,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 4,
+                                children: [
+                                  for (var d = 0; d < 7; d++)
+                                    FilterChip(
+                                      label: Text(dayLabel(d, isFa)),
+                                      visualDensity: VisualDensity.compact,
+                                      selected: w.daysOfWeek.split(',').contains('$d'),
+                                      onSelected: (v) {
+                                        final set = w.daysOfWeek.split(',').where((x) => x.isNotEmpty).toSet();
+                                        v ? set.add('$d') : set.remove('$d');
+                                        setState(() => windows[i] = QueueScheduleRuleUi(
+                                              action: w.action, daysOfWeek: set.toList().join(','),
+                                              startTime: w.startTime, endTime: w.endTime, enabled: w.enabled,
+                                            ));
+                                      },
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () => setState(() => windows = [
+                    ...windows,
+                    const QueueScheduleRuleUi(action: 'pause', startTime: '09:00', endTime: '17:00'),
+                  ]),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: Text(s.addWindow),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: Text(s.cancel)),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(s.save),
+            ),
+          ],
+        ),
+      ),
+    ).then((ok) async {
+      if (ok == true) {
+        final json = windows.map((w) => w.toJson()).toList();
+        await ref.read(prov.engineProvider)?.call('save_queue', {
+          'name': queue.name,
+          'schedule_json': jsonEncode(json),
+        });
+        ref.invalidate(prov.queuesProvider);
+      }
+    });
+  }
+}
+
+// ---- IDM parity v1.2.0: periodic sync rules -------------------------------------
+
+class SyncRulesPage extends ConsumerWidget {
+  const SyncRulesPage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = S.of(context);
+    final rules = ref.watch(prov.syncRulesProvider);
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(s.syncRules,
+                        style: Theme.of(context).textTheme.titleLarge!.copyWith(fontWeight: FontWeight.w800)),
+                    Text(s.syncRulesHint, style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: () => showSyncRuleEditor(context, ref, s, null),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: Text(s.addSyncRule),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: rules.when(
+            data: (list) => list.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(40),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.sync_rounded, size: 54, color: Theme.of(context).colorScheme.outline),
+                          const SizedBox(height: 12),
+                          Text(s.syncRules, style: Theme.of(context).textTheme.titleMedium),
+                          const SizedBox(height: 6),
+                          Text(s.syncRulesHint, style: Theme.of(context).textTheme.bodySmall),
+                        ],
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(20),
+                    itemCount: list.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, i) => _SyncRuleCard(rule: list[i]),
+                  ),
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Center(child: Text('$e')),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Future<void> showSyncRuleEditor(BuildContext context, WidgetRef ref, S s, SyncRuleUi? existing) async {
+  final name = TextEditingController(text: existing?.name ?? '');
+  final urls = TextEditingController(text: existing?.urls ?? '');
+  final dest = TextEditingController(text: existing?.destinationDir ?? '');
+  var interval = existing?.intervalMinutes ?? 60;
+  var enabled = existing?.enabled ?? true;
+
+  await showDialog(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        title: Text(existing == null ? s.addSyncRule : s.editSyncRule),
+        content: SizedBox(
+          width: 480,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: name, decoration: InputDecoration(labelText: s.ruleName)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: urls,
+                  maxLines: 5,
+                  decoration: InputDecoration(labelText: s.urlsOnePerLine, alignLabelWithHint: true),
+                ),
+                const SizedBox(height: 12),
+                TextField(controller: dest, decoration: InputDecoration(labelText: s.destination)),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  initialValue: interval,
+                  decoration: InputDecoration(labelText: s.intervalMinutes),
+                  items: const [
+                    DropdownMenuItem(value: 15, child: Text('15')),
+                    DropdownMenuItem(value: 30, child: Text('30')),
+                    DropdownMenuItem(value: 60, child: Text('60')),
+                    DropdownMenuItem(value: 360, child: Text('360')),
+                    DropdownMenuItem(value: 1440, child: Text('1440')),
+                  ],
+                  onChanged: (v) => setState(() => interval = v ?? 60),
+                ),
+                SwitchListTile(
+                  value: enabled,
+                  onChanged: (v) => setState(() => enabled = v),
+                  title: Text(s.enabled, style: const TextStyle(fontSize: 13.5)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(s.cancel)),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(s.save),
+          ),
+        ],
+      ),
+    ),
+  ).then((ok) async {
+    if (ok == true && name.text.trim().isNotEmpty && urls.text.trim().isNotEmpty) {
+      await ref.read(prov.engineProvider)?.call('save_sync_rule', {
+        if (existing != null && existing.id != 0) 'id': existing.id,
+        'name': name.text.trim(),
+        'urls': urls.text,
+        'destination_dir': dest.text,
+        'interval_minutes': interval,
+        'enabled': enabled,
+      });
+      ref.invalidate(prov.syncRulesProvider);
+    }
+  });
+}
+
+class _SyncRuleCard extends ConsumerWidget {
+  final SyncRuleUi rule;
+  const _SyncRuleCard({required this.rule});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = S.of(context);
+    final cs = Theme.of(context).colorScheme;
+    final urls = rule.urls.split('\n').where((u) => u.trim().isNotEmpty).length;
+    final lastRun = rule.lastRunMs <= 0
+        ? s.never
+        : DateTime.fromMillisecondsSinceEpoch(rule.lastRunMs).toLocal().toString().split('.').first;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                      color: (rule.enabled ? NovaColors.completed : NovaColors.paused).withOpacity(0.13),
+                      borderRadius: BorderRadius.circular(9)),
+                  child: Icon(Icons.sync_rounded,
+                      size: 17, color: rule.enabled ? NovaColors.completed : NovaColors.paused),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(rule.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                ),
+                Switch(
+                  value: rule.enabled,
+                  onChanged: (v) async {
+                    await ref.read(prov.engineProvider)?.call('save_sync_rule', {...rule.toJson(), 'enabled': v});
+                    ref.invalidate(prov.syncRulesProvider);
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '$urls URL(s) · ${s.intervalMinutes}: ${rule.intervalMinutes}',
+              style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+            ),
+            Text('${s.lastRun}: $lastRun', style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton.icon(
+                  onPressed: () async {
+                    final (added, unchanged) = await ref.read(prov.tasksProvider.notifier).runSync(rule.id);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(s.syncRunResult.replaceFirst('{a}', '$added').replaceFirst('{u}', '$unchanged')),
+                      ));
+                    }
+                    ref.invalidate(prov.syncRulesProvider);
+                  },
+                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                  label: Text(s.runNow, style: const TextStyle(fontSize: 12.5)),
+                ),
+                TextButton.icon(
+                  onPressed: () => _edit(context, ref, s),
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: Text(s.editTask, style: const TextStyle(fontSize: 12.5)),
+                ),
+                TextButton.icon(
+                  onPressed: () async {
+                    await ref.read(prov.engineProvider)?.call('delete_sync_rule', {'id': rule.id});
+                    ref.invalidate(prov.syncRulesProvider);
+                  },
+                  icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                  label: Text(s.delete, style: const TextStyle(fontSize: 12.5)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _edit(BuildContext context, WidgetRef ref, S s) async {
+    await showSyncRuleEditor(context, ref, s, rule);
+    ref.invalidate(prov.syncRulesProvider);
   }
 }

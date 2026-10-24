@@ -29,6 +29,10 @@ export interface ExtSettings {
   preferredQuality: string; // 'ask' | 'best' | height like '720'
   allowlist: string[]; // hosts; empty = all (except blocklist)
   blocklist: string[];
+  /** IDM parity v1.2.0 — special keys: hold this modifier while clicking a link to force download with Nova. */
+  interceptKey: 'alt' | 'ctrl' | 'shift' | 'none';
+  /** IDM parity v1.2.0 — while this key is held, Nova overlay + interception are suppressed. */
+  preventKey: 'none' | 'alt' | 'ctrl' | 'shift';
 }
 
 export const DEFAULT_SETTINGS: ExtSettings = {
@@ -38,6 +42,8 @@ export const DEFAULT_SETTINGS: ExtSettings = {
   preferredQuality: 'ask',
   allowlist: [],
   blocklist: [],
+  interceptKey: 'alt',
+  preventKey: 'none',
 };
 
 export async function loadSettings(): Promise<ExtSettings> {
@@ -70,6 +76,20 @@ export function siteAllowed(url: string, s: ExtSettings): boolean {
     return hostMatches(host, s.allowlist);
   } catch {
     return false;
+  }
+}
+
+/** IDM parity v1.2.0 — does this keyboard event hold the configured special key? */
+export function keyMatches(e: KeyboardEvent, key: 'alt' | 'ctrl' | 'shift' | 'none'): boolean {
+  switch (key) {
+    case 'alt':
+      return e.altKey || e.key === 'Alt';
+    case 'ctrl':
+      return e.ctrlKey || e.key === 'Control';
+    case 'shift':
+      return e.shiftKey || e.key === 'Shift';
+    default:
+      return false;
   }
 }
 

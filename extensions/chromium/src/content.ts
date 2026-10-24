@@ -6,7 +6,7 @@
  *   chosen download to the engine via the background service worker.
  */
 
-import { callBackground, MediaCandidate, siteAllowed, loadSettings, ExtSettings } from '../../shared/protocol';
+import { callBackground, MediaCandidate, siteAllowed, loadSettings, ExtSettings, keyMatches } from '../../shared/protocol';
 import { scanPlayers, watchDrm } from '../../shared/video-detect';
 import { NovaOverlay } from '../../shared/overlay';
 
@@ -45,6 +45,11 @@ async function refresh(): Promise<void> {
   );
 
   for (const p of players) {
+    // IDM parity v1.2.0: prevent key held → overlay stays hidden this pass.
+    if (preventHeld) {
+      overlays.get(p.video)?.overlay.hide();
+      continue;
+    }
     watchDrm(p.video);
     let rec = overlays.get(p.video);
     if (!rec) {
@@ -244,13 +249,34 @@ browser.runtime.onMessage.addListener((msg: { type?: string }) => {
   if (msg?.type === 'nova-open-links-dialog') openLinksDialog();
 });
 
-// ---- IDM parity: special keys — Alt+click forces "download with Nova" -------
+// ---- IDM parity v1.2.0: special keys ------------------------------------------------
+// interceptKey: hold while clicking a link → force download with Nova.
+// preventKey: hold → Nova overlay + interception suppressed (checked each refresh).
+let preventHeld = false;
+document.addEventListener(
+  'keydown',
+  (e) => {
+    if (settings?.preventKey && settings.preventKey !== 'none' && keyMatches(e, settings.preventKey)) preventHeld = true;
+  },
+  true,
+);
+document.addEventListener(
+  'keyup',
+  (e) => {
+    if (settings?.preventKey && settings.preventKey !== 'none' && keyMatches(e, settings.preventKey)) preventHeld = false;
+  },
+  true,
+);
+window.addEventListener('blur', () => { preventHeld = false; });
+
 document.addEventListener(
   'click',
   (e) => {
-    if (!e.altKey || e.defaultPrevented) return;
+    if (e.defaultPrevented || preventHeld || !settings?.enabled) return;
+    if (!settings.interceptKey || settings.interceptKey === 'none') return;
+    if (!keyMatches(e as unknown as KeyboardEvent, settings.interceptKey)) return;
     const a = (e.target as HTMLElement | null)?.closest?.('a[href]');
-    if (!a || !settings?.enabled) return;
+    if (!a) return;
     e.preventDefault();
     e.stopPropagation();
     void callBackground({ type: 'add-download', url: (a as HTMLAnchorElement).href, referer: location.href });

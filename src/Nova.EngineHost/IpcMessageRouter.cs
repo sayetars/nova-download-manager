@@ -24,6 +24,8 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
     private readonly GrabberService _grabber;
     private readonly HttpClient _http;
     private readonly Action _requestShutdown;
+    private readonly ISyncRuleRepository _syncRules;
+    private readonly SyncService _syncService;
     private readonly IDisposable _subscription;
     private readonly DateTime _startedAt = DateTime.UtcNow;
     private readonly NovaDatabase _db;
@@ -33,7 +35,8 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
 
     public IpcMessageRouter(DownloadEngine engine, SchedulerService scheduler, ISettingsRepository settings,
         IQueueRepository queues, MediaCandidatesService mediaProbe, NovaDatabase db, string dataDir, string downloadsDir,
-        LoginVault vault, GrabberService grabber, HttpClient http, Action requestShutdown)
+        LoginVault vault, GrabberService grabber, HttpClient http, Action requestShutdown,
+        ISyncRuleRepository? syncRules = null, SyncService? syncService = null)
     {
         _engine = engine;
         _scheduler = scheduler;
@@ -46,8 +49,10 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
         _vault = vault;
         _grabber = grabber;
         _http = http;
-        _requestShutdown = requestShutdown;
         _db = db;
+        _requestShutdown = requestShutdown;
+        _syncRules = syncRules ?? throw new ArgumentNullException(nameof(syncRules));
+        _syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
 
         // engine events → broadcast to all IPC clients (throttled for progress)
         _subscription = engine.Events.Subscribe(new BusSink(this));
@@ -228,6 +233,7 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                         active_count = tasks.Count(t => t.QueueName == q.Name && t.State == DownloadState.Downloading),
                         waiting_count = tasks.Count(t => t.QueueName == q.Name && t.State == DownloadState.Queued),
                         total_count = tasks.Count(t => t.QueueName == q.Name),
+                        schedule_json = q.ScheduleJson,
                     });
                     return Envelope.Ok(id, new { queues = payloads });
                 }
@@ -241,6 +247,7 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                     if (req.MaxConcurrent is { } mc) q.MaxConcurrent = mc;
                     if (req.SpeedCapBytes is { } sc) q.SpeedCapBytes = sc;
                     if (req.DestinationDir is { } dd && Directory.Exists(dd)) q.DestinationDir = dd;
+                    if (req.ScheduleJson is { } sj) q.ScheduleJson = Nova.Scheduler.QueueSchedule.Parse(sj) is { Count: 0 } ? "" : sj;
                     _queues.Save(q);
                     return Envelope.Ok(id);
                 }
@@ -547,6 +554,85 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                     var req = env.PayloadAs<GrabberStartRequest>() ?? new();   // reuse: RootUrl holds the pattern
                     var urls = Nova.Engine.UrlPatterns.Expand(req.RootUrl);
                     return Envelope.Ok(id, new { urls });
+                }
+
+                // ---- IDM parity v1.2.0: sync queues + per-server caps + IDM import ----
+
+                case "list_sync_rules":
+                {
+                    var rules = _syncRules.GetAll().Select(r => new
+                    {
+                        id = r.Id, name = r.Name, urls = r.Urls,
+                        destination_dir = r.DestinationDir, category = r.Category,
+                        interval_minutes = r.IntervalMinutes, enabled = r.Enabled, last_run_ms = r.LastRunMs,
+                    });
+                    return Envelope.Ok(id, new { rules });
+                }
+
+                case "save_sync_rule":
+                {
+                    var req = env.PayloadAs<SaveSyncRuleRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.Name) || string.IsNullOrWhiteSpace(req.Urls))
+                        return Envelope.Error(id, "bad_request", "protocol", "Rule name and URLs are required.");
+                    var rule = new SyncRule
+                    {
+                        Id = req.Id ?? 0,
+                        Name = req.Name.Trim(),
+                        Urls = req.Urls,
+                        DestinationDir = req.DestinationDir,
+                        Category = string.IsNullOrWhiteSpace(req.Category) ? "other" : req.Category,
+                        IntervalMinutes = Math.Clamp(req.IntervalMinutes, 1, 100_80),
+                        Enabled = req.Enabled,
+                    };
+                    if (rule.Id == 0) rule.Id = _syncRules.Insert(rule);
+                    else _syncRules.Update(rule);
+                    return Envelope.Ok(id, new { id = rule.Id });
+                }
+
+                case "delete_sync_rule":
+                {
+                    var req = env.PayloadAs<DeleteSyncRuleRequest>() ?? new();
+                    if (req.Id <= 0) return Envelope.Error(id, "bad_request", "protocol", "Rule id is required.");
+                    _syncRules.Delete(req.Id);
+                    _syncRules.ForgetRule(req.Id);
+                    return Envelope.Ok(id);
+                }
+
+                case "run_sync":
+                {
+                    var req = env.PayloadAs<RunSyncRequest>() ?? new();
+                    if (req.Id <= 0) return Envelope.Error(id, "bad_request", "protocol", "Rule id is required.");
+                    var result = await _syncService.RunRuleAsync(req.Id, req.Force);
+                    return Envelope.Ok(id, new
+                    {
+                        rule_id = result.RuleId, checked_count = result.Checked, added = result.Added,
+                        unchanged = result.Unchanged, failed = result.Failed,
+                    });
+                }
+
+                case "import_idm":
+                {
+                    var req = env.PayloadAs<ImportIdmRequest>() ?? new();
+                    var urls = Nova.Engine.IdmImport.ExtractUrls(req.Content);
+                    if (urls.Count == 0)
+                        return Envelope.Ok(id, new { imported = 0, duplicates = 0, urls = Array.Empty<string>() });
+                    var outcomes = _engine.AddBatch(urls.Select(u => new NewDownload { Url = u, AutoStart = req.AutoStart }));
+                    var imported = outcomes.Count(o => !o.Duplicate && !o.TaskKey.StartsWith("error:"));
+                    var duplicates = outcomes.Count(o => o.Duplicate);
+                    return Envelope.Ok(id, new { imported, duplicates, urls });
+                }
+
+                case "per_server_overview":
+                {
+                    var active = _engine.ActivePerHost();
+                    var defaults = Nova.Scheduler.PerServerPolicy.ParseDefault(_settings.Get("scheduler.per_server_max"));
+                    var exceptions = Nova.Scheduler.PerServerPolicy.ParseExceptions(_settings.Get("scheduler.server_exceptions"));
+                    return Envelope.Ok(id, new
+                    {
+                        default_max = defaults,
+                        active = active,
+                        exceptions = exceptions.Select(e => new { host = e.Host, max = e.Max }),
+                    });
                 }
 
                 default:
