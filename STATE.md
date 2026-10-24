@@ -2,7 +2,7 @@
 
 ## START-HERE BLOCK (keep at top, update every checkpoint)
 ```text
-CURRENT VERSION: v1.1.0
+CURRENT VERSION: v1.2.0
 CURRENT TASK: T-014 (v1.2.0 IDM Parity Polish — ALL P2 gaps) COMPLETE — per-server connection caps (#14), extension special keys + options page (#23), per-queue start/stop schedules (#26), periodic sync queues w/ ETag/Last-Modified (#28), sortable downloads list (#36), always-on-top progress mini-window (#44), complete-dialog customization, best-effort IDM import. IDM-PARITY matrix now: 0 MISSING rows (remaining PARTIAL rows are deliberate design trade-offs or platform-scoped).
 CURRENT SUBSTEP: —
 DONE: v1.2.0 shipped: SQLite migration v6 (sync_rule/sync_state/queue schedule_json), SyncService + PerServerPolicy + QueueSchedule + IdmImport (engine), 6 new IPC commands (list/save/delete_sync_rule, run_sync, import_idm, per_server_overview), Flutter sync page + queue schedule editor + sort menu + per-server settings + mini_app.dart (--mini), linux runner nova/window channel + always-on-top, windows runner HWND_TOPMOST path (not compiled — KNOWN-LIMITATIONS #9), extension keyMatches + preventKey overlay suppression + options page (both browsers), manifests 1.2.0.
