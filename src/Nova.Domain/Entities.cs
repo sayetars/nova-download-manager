@@ -114,6 +114,12 @@ public sealed class DownloadTask
     /// <summary>Post-download conversion preset ("" | mp3 | remux) — requires ffmpeg on PATH.</summary>
     public string ConvertPreset { get; set; } = string.Empty;
 
+    /// <summary>BitTorrent info-hash (hex, 40 chars) once the torrent metadata is known (v1.4.0).</summary>
+    public string BtInfoHash { get; set; } = string.Empty;
+
+    /// <summary>BitTorrent: keep serving (seeding) after completion (v1.4.0).</summary>
+    public bool SeedAfter { get; set; }
+
     [JsonIgnore] public bool HasSpeedCap => SpeedCapBytes > 0;
 
     [JsonIgnore] public IReadOnlyList<string> Mirrors =>

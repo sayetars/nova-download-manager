@@ -138,9 +138,12 @@ function collectLinks(): { url: string; text: string; group: 'documents' | 'medi
   const seen = new Set<string>();
   for (const a of document.querySelectorAll<HTMLAnchorElement>('a[href]')) {
     const href = a.href;
-    if (!/^https?:/i.test(href) || seen.has(href)) continue;
+    // v1.4.0: magnet links join the batch dialog (BitTorrent support)
+    const isMagnet = href.startsWith('magnet:');
+    if ((!/^https?:/i.test(href) && !isMagnet) || seen.has(href)) continue;
     seen.add(href);
-    const group = DOC_RE.test(href) ? 'documents'
+    const group = isMagnet ? 'other'
+      : DOC_RE.test(href) ? 'documents'
       : MEDIA_RE.test(href) ? 'media'
       : ARCHIVE_RE.test(href) ? 'archives'
       : 'other';

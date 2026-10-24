@@ -167,6 +167,7 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
     String? extraHeaders,
     String? expectedHash,
     bool sequential = false,
+    bool seedAfter = false,
   }) async {
     final engine = ref.read(engineProvider);
     if (engine == null) return null;
@@ -182,6 +183,7 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
       if (extraHeaders != null && extraHeaders.isNotEmpty) 'extra_headers': extraHeaders,
       if (expectedHash != null && expectedHash.isNotEmpty) 'expected_hash': expectedHash,
       if (sequential) 'sequential': true,
+      if (seedAfter) 'seed_after': true,
       'auto_start': autoStart,
     });
     await _load();

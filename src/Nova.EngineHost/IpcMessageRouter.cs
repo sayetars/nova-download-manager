@@ -829,6 +829,7 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
         {
             "hls" => DownloadKind.Hls,
             "dash" => DownloadKind.Dash,
+            "torrent" => DownloadKind.Torrent,
             _ => null,
         },
         MediaSelection = r.MediaSelection,
@@ -842,6 +843,7 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
         ExpectedHash = r.ExpectedHash,
         PieceHashes = r.PieceHashes,
         ConvertPreset = r.ConvertPreset,
+        SeedAfter = r.SeedAfter,
     };
 
     // ---- custom categories (category_def table) ----------------------------

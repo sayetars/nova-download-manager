@@ -26,6 +26,8 @@ public enum DownloadKind
     Hls = 1,
     /// <summary>DASH manifest; engine downloads a representation's segments.</summary>
     Dash = 2,
+    /// <summary>BitTorrent (v1.4.0): .torrent file or magnet URI.</summary>
+    Torrent = 3,
 }
 
 public enum TaskPriority

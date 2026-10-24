@@ -64,3 +64,35 @@ Token bucket (global + per-task + per-queue), bytes-priced, await-fair. Sliding-
 - HLS: master → variant selection (best bandwidth, or preferred height, or lowest), media playlist parse (segments, init segment, keys). `EXT-X-KEY != NONE` → refused (`drm_protected`); live (no `EXT-X-ENDLIST`) → refused (`live_stream`). Segments are downloaded sequentially and concatenated (TS streams concatenate natively; fMP4 handled with init segments).
 - DASH: MPD parse (SegmentTemplate duration & timeline, SegmentList), representations with bandwidth/size, `ContentProtection` → refused. Separate audio+video representations: muxed via **ffmpeg if found on PATH**; otherwise saved as two clearly named files (documented limitation, no fake muxing).
 - The task progress panel shows segment counts (`segments_done/segments_total`) for media tasks.
+
+## BitTorrent (`Nova.Engine/Torrent/`, v1.4.0)
+
+A protocol-correct BitTorrent v1 stack, implemented from the BEPs and verified against
+our own seeder + a loopback tracker (all tests offline; no external swarm dependency).
+
+| Piece | File | BEP |
+|---|---|---|
+| Bencode codec (canonical, binary-safe, sorted keys) | `Bencode.cs` | 3 |
+| Metainfo + magnet parse/build + torrent creator | `TorrentMeta.cs` | 3/9 |
+| HTTP tracker announce (compact + dict peers) | `Trackers.cs` | 3 |
+| UDP tracker connect/announce (txn ids, conn-id cache) | `Trackers.cs` | 15 |
+| DHT node: KRPC, 160-bit k-buckets, get_peers iteration | `DhtClient.cs` | 5 |
+| Peer wire: handshake, choke/interest, bitfield, request/piece | `PeerWireClient.cs` | 3 |
+| Extension handshake + ut_metadata (fetch AND serve) | `PeerWireClient.cs` | 10/9 |
+| Rarest-first / sequential piece picker + in-flight dedup | `PiecePicker.cs` | 3 strategy |
+| Session: discovery, pumps, verify, resume, seed, split | `TorrentSession.cs` | — |
+| TaskRunner adapter + seeder registry | `TorrentTask.cs` | — |
+
+**Disk model** — one contiguous `.novadl` temp (random-access writes at piece offsets);
+`<name>.novadl.bf` bitfield sidecar persists VERIFIED pieces only (crash-safe resume);
+magnet metadata is persisted as `<infohash>.torrent` next to the destination; multi-file
+torrents split into per-file paths on completion; single-file temp moves to final (unique
+path on collision).
+
+**Engine flow** — `magnet:` URIs and local `.torrent` paths bypass HTTP probing entirely
+(`DownloadKind.Torrent`), progress/quota/speed wiring is identical to FTP/SFTP tasks, and
+`seed_after` keeps the session serving after the task reports Completed (stopped when the
+engine exits or the task is removed).
+
+**Settings** — `bt_dht` (default on), `bt_upload_cap` (bytes/s while seeding),
+`bt_listen_port` (fixed port) / `bt_listen=1` (ephemeral), `bt_metadata_timeout` (seconds).

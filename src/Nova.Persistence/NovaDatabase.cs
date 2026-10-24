@@ -47,6 +47,7 @@ public sealed class NovaDatabase : IAsyncDisposable
         if (SchemaVersion < 5) { RunMigration(5, Sql.Migration5); SchemaVersion = 5; }
         if (SchemaVersion < 6) { RunMigration(6, Sql.Migration6); SchemaVersion = 6; }
         if (SchemaVersion < 7) { RunMigration(7, Sql.Migration7); SchemaVersion = 7; }
+        if (SchemaVersion < 8) { RunMigration(8, Sql.Migration8); SchemaVersion = 8; }
     }
 
     private void RunMigration(int version, string sql)
@@ -287,6 +288,11 @@ internal static class Sql
             last_modified TEXT,
             PRIMARY KEY (rule_id, url)
         );
+        """;
+
+    public const string Migration8 = """
+        ALTER TABLE download_task ADD COLUMN bt_info_hash TEXT NOT NULL DEFAULT '';
+        ALTER TABLE download_task ADD COLUMN seed_after INTEGER NOT NULL DEFAULT 0;
         """;
 
     public const string Migration7 = """

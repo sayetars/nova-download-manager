@@ -89,7 +89,8 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       final data = await Clipboard.getData('text/plain');
       final text = data?.text?.trim();
       if (text == null || text.isEmpty || text == _lastClip || text.length > 2048) return;
-      final isUrl = RegExp(r'^(https?|ftps?)://\S+$', caseSensitive: false).hasMatch(text);
+      final isUrl = RegExp(r'^(https?|ftps?)://\S+$', caseSensitive: false).hasMatch(text)
+          || text.startsWith('magnet:?');
       if (!isUrl) return;
       _lastClip = text;
       if (!mounted) return;
@@ -99,13 +100,18 @@ class _ShellPageState extends ConsumerState<ShellPage> {
   }
 
   /// IDM parity: dropped links/text → prefill Add dialog (single URL) or the
-  /// batch Add dialog (multiple). Dropped local files are ignored.
+  /// batch Add dialog (multiple). Dropped .torrent files prefill as torrent sources.
   void _handleDrop(List<String> items) {
     if (!mounted || items.isEmpty) return;
-    final urls = items
-        .map((it) => it.startsWith('file://') ? '' : it)
-        .where((it) => RegExp(r'^(https?|ftps?)://\S+', caseSensitive: false).hasMatch(it))
-        .toList();
+    final urls = items.map((it) {
+      // local .torrent file drop → pass the raw path to the engine
+      if (it.startsWith('file://')) {
+        final path = Uri.tryParse(it)?.toFilePath() ?? it.substring(7);
+        return path.toLowerCase().endsWith('.torrent') ? path : '';
+      }
+      if (it.startsWith('magnet:')) return it;
+      return RegExp(r'^(https?|ftps?)://\S+', caseSensitive: false).hasMatch(it) ? it : '';
+    }).where((it) => it.isNotEmpty).toList();
     if (urls.isEmpty) return;
     if (urls.length == 1) {
       showAddDownloadDialog(context, prefillUrl: urls.first);

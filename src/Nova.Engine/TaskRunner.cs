@@ -130,6 +130,13 @@ public sealed class TaskRunner
             SetState(task, DownloadState.Analyzing, null);
             _persistTask(task);
 
+            // ---- BitTorrent (v1.4.0): magnet: or local .torrent — full swarm pipeline -----
+            if (Torrent.TorrentTask.IsTorrentSource(task.EffectiveUrl ?? task.Url))
+            {
+                await RunTorrentAsync(task, ct);
+                return;
+            }
+
             // ---- analyze / revalidate -------------------------------------
             var probe = await _prober.ProbeAsync(task.EffectiveUrl ?? task.Url, task.Referer, ct, task);
 
@@ -971,6 +978,30 @@ public sealed class TaskRunner
             if (delta > 0) { Interlocked.Add(ref _runReceived, delta); Speed.Add(delta); _quotaHook?.Invoke(delta); }
             _events.MaybeProgress(task, rate > 0 ? rate : Speed.SpeedBps, 500);
         }, ct);
+
+        task.FileName = Path.GetFileName(finalPath);
+        task.CompletedAt = DateTimeOffset.UtcNow;
+        SetState(task, DownloadState.Completed, null);
+        _persistTask(task);
+        _events.Completed(task, finalPath);
+    }
+
+    /// <summary>BitTorrent path (v1.4.0): metadata → swarm download → optional seeding.</summary>
+    private async Task RunTorrentAsync(DownloadTask task, CancellationToken ct)
+    {
+        SetState(task, DownloadState.Downloading, null);
+        _persistTask(task);
+        var finalPath = await Torrent.TorrentTask.RunAsync(task, (delta, rate) =>
+        {
+            if (delta > 0)
+            {
+                Interlocked.Add(ref _runReceived, delta);
+                Speed.Add(delta);
+                task.ReceivedBytes += delta;
+                _quotaHook?.Invoke(delta);
+            }
+            _events.MaybeProgress(task, rate > 0 ? rate : Speed.SpeedBps, 500);
+        }, ct, Setting);
 
         task.FileName = Path.GetFileName(finalPath);
         task.CompletedAt = DateTimeOffset.UtcNow;

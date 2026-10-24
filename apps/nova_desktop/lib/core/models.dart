@@ -57,7 +57,16 @@ class TaskUi {
     this.completedAtMs,
     this.speedBps = 0,
     this.etaSeconds = -1,
+    this.btInfoHash,
+    this.seedAfter = false,
   });
+
+  /// BitTorrent info-hash (v1.4.0) — null for non-torrent tasks.
+  final String? btInfoHash;
+  /// BitTorrent: keeps serving after completion (v1.4.0).
+  final bool seedAfter;
+
+  bool get isTorrent => kind == 'torrent';
 
   bool get isRunning =>
       state == 'downloading' || state == 'analyzing' || state == 'verifying' || state == 'pausing' || state == 'retrying';
@@ -94,6 +103,8 @@ class TaskUi {
         createdAtMs: (j['created_at_ms'] ?? 0) as int,
         startedAtMs: j['started_at_ms'] as int?,
         completedAtMs: j['completed_at_ms'] as int?,
+        btInfoHash: j['bt_info_hash'] as String?,
+        seedAfter: (j['seed_after'] ?? false) as bool,
       );
 
   TaskUi withProgress(Map<String, dynamic> p) => TaskUi(
@@ -122,6 +133,8 @@ class TaskUi {
         completedAtMs: completedAtMs,
         speedBps: (p['speed'] as int?) ?? speedBps,
         etaSeconds: (p['eta_seconds'] as int?) ?? etaSeconds,
+        btInfoHash: btInfoHash,
+        seedAfter: seedAfter,
       );
 }
 

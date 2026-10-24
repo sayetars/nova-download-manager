@@ -84,7 +84,11 @@ JSON conventions: **snake_case** keys, enum values as lowercase strings.
 
 ### TaskSnapshot
 
-`task_key, task_id, state, kind, file_name, url, effective_url, destination_dir, queue_name, category, total_bytes (-1 unknown), received_bytes, segment_count, segments_done, segments_total, error_code?, error_message?, error_category?, validation, priority, retry_count, created_at_ms, started_at_ms?, completed_at_ms?`
+`task_key, task_id, state, kind, file_name, url, effective_url, destination_dir, queue_name, category, total_bytes (-1 unknown), received_bytes, segment_count, segments_done, segments_total, error_code?, error_message?, error_category?, validation, priority, retry_count, created_at_ms, started_at_ms?, completed_at_ms?, bt_info_hash? (v1.4.0), seed_after (v1.4.0)`
+
+v1.4.0 additions: `kind: "torrent"` (magnet: URIs and local `.torrent` paths are accepted
+by `add_download` directly), optional `seed_after: true` on `add_download` keeps the
+BitTorrent session seeding after completion.
 
 ## Error model
 

@@ -1,30 +1,28 @@
 # RESUME-POINT — atomic continuation contract
 
-updated: 2026-10-24 (T-015 v1.3.0 "Beyond IDM — Market Parity" complete — shipped)
-task: NONE OPEN — awaiting user feedback / next directive (v1.4.0 flagship = BitTorrent)
+updated: 2026-10-24 (T-016 v1.4.0 "BitTorrent core" complete — shipped)
+task: NONE OPEN — awaiting user feedback / next directive (v1.4.x = BT polish track)
 substep: —
 
-done (T-015, this session, after env reset + toolchain rebuild):
-- Research: docs/FEATURE-GAP-2026.md — 28-row matrix vs FDM/JDownloader/aria2/Motrix/Persepolis/uGet/NDM + RFCs; 16 items IMPLEMENTED in v1.3.0, 5 EXCLUDED (captcha, hoster plugins, DLC, …), BT = v1.4.0 flagship, rest roadmap
-- Engine: Metalink.cs (v4/v3 XML + RFC 6249 Link/Digest + sidecars + FilenameTokens + CookieFile), Hashing.cs (algo-qualified sha256/sha1/md5/crc32 + PieceHashInfo), FeedService.cs, ArchiveTools.cs (extract + convert), SftpTask.cs (SSH.NET), WebDav.cs
-- TaskRunner: multi-source SourcePool (round-robin + strikes), sequential picker, metalink/sidecar expansion in analyze, piece verify + repair, generalized hash verify, cookies/headers via ApplyTaskHeaders (probe + segments + vault retry + repair fetches)
-- Schema v7: task columns (cookies/extra_headers/sequential/expected_hash/piece_hashes/convert_preset) + feed_rule + feed_seen; repo mapping updated
-- IPC: new messages (SaveFeedRuleRequest, RunFeedRequest, DeleteFeedRuleRequest, ImportCookiesRequest, TaskPostProcessRequest), router cases (list/save/delete_feed_rule, run_feed, import_cookies, dav_list, task_postprocess), ToSpec + update_task extended; TaskSnapshot +6 fields
-- EngineHost: JsonRpcServer.cs (JSON-RPC 2.0 HTTP+WS on 127.0.0.1:16801, token, port-walk on collision, method map 24 cmds), FeedService wired, rpc settings
-- UI: feeds_page.dart (new), shell nav + switch, settings sections (remote control/integrity/post-processing), Advanced add-dialog (cookies/headers/hash/sequential), strings EN+FA (~47 new keys)
-- Extensions: opt-in cookie pass-through (protocol.ts, background.ts cookieHeaderFor, options page checkbox, cookies permission), rebuilt + re-zipped 1.3.0
-- Release: versions 1.3.0 everywhere; engine/browserhost/cli/self-contained published; package_release.sh VER bump; tarball sha256 73ca0059478f2818…; smoke + parity 12/12 + clean-env PASS
-- Gotchas fixed en route: publish with /p:AssemblyName leaks into restore graph (ambiguous project name) — publish WITHOUT /p; single-file publish poisons runtimeconfig for FDD (separate PublishDir); NOT NULL DEFAULT columns reject explicit NULL binds; HttpListener is disposed after failed Start (recreate per attempt); XDocument namespace-safe lookups for Atom/propfind; %ext% has no leading dot
+done (T-016, this session, after env reset + toolchain rebuild):
+- Environment reconverged per RECOVERY.md: .NET 8.0.426 + Flutter 3.47.7 (exact) + GTK 3.24.49 + clang 19.1.7 (symlinked) + cmake/ninja; 127/127 baseline re-verified before any new work
+- Engine: src/Nova.Engine/Torrent/{Bencode, TorrentMeta(+Creator), Trackers (BEP-3 HTTP + BEP-15 UDP), DhtClient (BEP-5), PeerWireClient (BEP-3/10/9), PiecePicker, TorrentSession, TorrentTask(+SeederRegistry)}.cs
+- Integration: DownloadKind.Torrent; magnet:/+local .torrent URL admission; TaskRunner dispatch before probe; migration v8 (bt_info_hash, seed_after); repo mapping; TaskSnapshot +2 fields; ToSpec seed_after; bt_dht/bt_upload_cap/bt_listen_port/bt_listen/bt_metadata_timeout settings
+- Tests: TorrentProtocolTests (24: bencode vectors, binary-safe keys, metainfo, multi-file path sanitize, magnet hex/base32, loopback HTTP+UDP trackers, picker, DHT two-node KRPC, wire framing, ut_metadata), TorrentE2eTests (6: byte-exact download via own seeder+tracker, deterministic resume from pre-seeded bitfield, magnet metadata via ut_metadata, 3-downloader fan-out, seed-back upload, corrupt-temp re-verify), TorrentEngineTests (3: engine-level .torrent task, magnet task, snapshot fields) — serialized via [Collection("TorrentSerial")]
+- Bugs found & fixed en route (all test-covered): extension-message length prefix inverted (regular messages lost their id byte); REQUEST payload length misread as payload.Length-8 instead of BE field; block released on arrival (duplicate traffic); ut_metadata prefix walker grammar-blind (binary d/e bytes); DhtClient unbound socket (port 0 → EINVAL); announce-list encoded flat instead of tiered; sidecar recreated after FinishAsync deleted it; metadata_size advertised after the handshake was already sent; HttpTracker read binary peers as string
+- UI: magnet banner + seed-after toggle in Add dialog; magnet acceptance in URL validation; clipboard + drop magnet/.torrent; TaskUi btInfoHash/seedAfter; strings EN/FA (+4 keys)
+- Extensions: magnet links collected in ALL-links dialog (both); 1.4.0 manifests; rebuilt + rezipped
+- Release: versions bumped (pubspec 1.4.0+4, manifests, scripts VER); tarball sha256 e61360c39a1aeb1e698ae55e283eaee9a67f9cffca7fe1a74860130c6f8cf772; engine+browserhost+cli published; smoke + parity 12/12 + clean-env PASS; Dropbox uploads + round-trip verified; docs updated (CHANGELOG, VERSIONS, DOWNLOAD-ENGINE, IPC-PROTOCOL, FEATURE-GAP-2026, KNOWN-LIMITATIONS)
 
 next:
-1. USER: test v1.3.0 (download/nova-dm-1.3.0-linux-x64.tar.gz) → feedback
-2. v1.4.0 BitTorrent core (bencode, .torrent+magnet, BEP-3/15 trackers, BEP-5 DHT, BEP-9/10, piece picker, seed mode; verify via local tracker + own seeder)
-3. Partial-file preview player; optional yt-dlp bridge; per-server perf profiles; client certs; metalink PGP
+1. USER: test v1.4.0 (download/nova-dm-1.4.0-linux-x64.tar.gz) → feedback
+2. v1.4.x BT polish: PEX (BEP-11), DHT peer-store serving, per-file selection in multi-file torrents, UDP tracker scrape, super-seeding
+3. v1.5.0 candidates: partial-file player preview (G17); yt-dlp optional bridge (G28); per-server perf profiles (G27); client certs (G25); metalink PGP (G26)
 4. Any new session: read STATE.md → this file → worklog.md tail → continue
 
 evidence:
-- sha256(nova-dm-1.3.0-linux-x64.tar.gz) = 73ca0059478f2818… (full in VERSIONS.md)
-- 127/127 dotnet; 8/8 flutter; smoke/parity/clean-env PASS; JSON-RPC live round-trip
+- sha256(nova-dm-1.4.0-linux-x64.tar.gz) = e61360c39a1aeb1e698ae55e283eaee9a67f9cffca7fe1a74860130c6f8cf772
+- 160/160 dotnet; 8/8 flutter; 0 analyze errors; smoke/parity/clean-env PASS; Dropbox round-trip verified
 
 blockers: none
 recovery: RECOVERY.md

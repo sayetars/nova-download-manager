@@ -140,6 +140,11 @@ public sealed record TaskSnapshot
     public string ConvertPreset { get; init; } = "";
     /// <summary>Number of multi-source URLs (1 = primary only).</summary>
     public int SourceCount { get; init; }
+    // ---- v1.4.0 additions ----
+    /// <summary>BitTorrent info-hash (hex) when known.</summary>
+    public string? BtInfoHash { get; init; }
+    /// <summary>BitTorrent: keeps serving after completion (seeding).</summary>
+    public bool SeedAfter { get; init; }
 
     public static TaskSnapshot From(DownloadTask t) => new()
     {
@@ -175,6 +180,8 @@ public sealed record TaskSnapshot
         Sequential = t.Sequential,
         ConvertPreset = t.ConvertPreset ?? "",
         SourceCount = 1 + t.Mirrors.Count(u => u.StartsWith("http", StringComparison.OrdinalIgnoreCase)),
+        BtInfoHash = string.IsNullOrEmpty(t.BtInfoHash) ? null : t.BtInfoHash,
+        SeedAfter = t.SeedAfter,
     };
 }
 

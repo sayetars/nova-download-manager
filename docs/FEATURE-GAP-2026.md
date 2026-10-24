@@ -74,10 +74,10 @@ DRM refusal; interception opt-in; Persian-first RTL; no captcha/hoster plugins.
 
 ## 4. v1.4.0 roadmap (honest sequencing — BitTorrent is a subsystem, not a checkbox)
 
-1. **BitTorrent core** (G1): bencode, `.torrent` + magnet, HTTP/UDP trackers (BEP-3/15),
-   DHT (BEP-5), extension protocol + ut_metadata (BEP-10/9), rarest-first + sequential
-   pickers, multi-file, resume bitfield, seeding. Verified via a local tracker + our own
-   seeder (no external swarm). This is the single remaining headline gap vs FDM/Motrix/JD2.
+1. ~~**BitTorrent core** (G1)~~ — **SHIPPED in v1.4.0**: bencode, `.torrent` + magnet,
+   HTTP/UDP trackers (BEP-3/15), DHT (BEP-5), extension protocol + ut_metadata (BEP-10/9),
+   rarest-first + sequential pickers, multi-file, resume bitfield, seeding. Verified via a
+   local tracker + our own seeder (no external swarm) — 33 new tests, byte-exact E2E.
 2. **Partial-file player preview** (G17 finish): in-app player on the `.novadl` temp file.
 3. **yt-dlp optional bridge** (G28): external-tool integration, off by default.
 4. **Per-server performance profiles** (G27) + client certificates (G25) + metalink PGP (G26).

@@ -136,11 +136,13 @@ public sealed class DownloadEngine : IAsyncDisposable
 
     public Result<AddDownloadOutcome> Add(NewDownload spec)
     {
+        var isTorrentSource = Torrent.TorrentTask.IsTorrentSource(spec.Url);
         if (string.IsNullOrWhiteSpace(spec.Url) || !Uri.TryCreate(spec.Url, UriKind.Absolute, out var uri)
             || (uri.Scheme != "http" && uri.Scheme != "https" && uri.Scheme != "ftp" && uri.Scheme != "ftps"
-                && uri.Scheme != "sftp" && uri.Scheme != "dav" && uri.Scheme != "davs"))
+                && uri.Scheme != "sftp" && uri.Scheme != "dav" && uri.Scheme != "davs"
+                && uri.Scheme != "magnet" && uri.Scheme != "file" && !isTorrentSource))
             return Result<AddDownloadOutcome>.Fail("bad_url", ErrorCategory.Protocol,
-                "The link is not a valid HTTP(S)/FTP(S)/SFTP/WebDAV URL.");
+                "The link is not a valid HTTP(S)/FTP(S)/SFTP/WebDAV/magnet URL or .torrent file.");
 
         // dedupe: same URL already tracked & not terminal-failed
         var dup = _tasks.Values.FirstOrDefault(e =>
@@ -174,6 +176,7 @@ public sealed class DownloadEngine : IAsyncDisposable
             ExpectedHash = spec.ExpectedHash,
             PieceHashes = spec.PieceHashes,
             ConvertPreset = spec.ConvertPreset ?? "",
+            SeedAfter = spec.SeedAfter,
             State = DownloadState.Created,
         };
         task.Id = _repo.Insert(task);
@@ -198,9 +201,14 @@ public sealed class DownloadEngine : IAsyncDisposable
 
     public static DownloadKind DetectKind(string url)
     {
+        if (url.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase)) return DownloadKind.Torrent;
         var path = url.Split('?')[0];
         if (path.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)) return DownloadKind.Hls;
         if (path.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase)) return DownloadKind.Dash;
+        if (path.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase)
+            && (url.StartsWith("file://", StringComparison.OrdinalIgnoreCase)
+                || File.Exists(url)))
+            return DownloadKind.Torrent;
         return DownloadKind.File;
     }
 
@@ -580,6 +588,8 @@ public sealed record NewDownload
     public string? PieceHashes { get; init; }
     /// <summary>v1.3.0: post-download conversion preset ("" | mp3 | remux).</summary>
     public string? ConvertPreset { get; init; }
+    /// <summary>v1.4.0: BitTorrent — keep serving (seeding) after completion.</summary>
+    public bool SeedAfter { get; init; }
 }
 
 public sealed record AddDownloadOutcome(string TaskKey, long TaskId, bool Duplicate);

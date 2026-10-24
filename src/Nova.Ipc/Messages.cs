@@ -47,6 +47,8 @@ public sealed class AddDownloadRequest
     public string? PieceHashes { get; set; }
     /// <summary>v1.3.0: post-download conversion preset ("" | mp3 | remux).</summary>
     public string? ConvertPreset { get; set; }
+    /// <summary>v1.4.0: BitTorrent — keep serving (seeding) after completion.</summary>
+    public bool SeedAfter { get; set; }
 }
 
 public sealed class BatchAddRequest

@@ -2,6 +2,35 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [1.4.0] — 2026-10-24
+
+**BitTorrent core** — the last headline gap vs FDM / Motrix / JDownloader 2 / qBittorrent. A real, protocol-correct v1 stack implemented from the specs and verified against our own seeder + loopback tracker (no external swarm dependency in tests). C# suite grew 127 → 160 tests (+33 across `TorrentProtocolTests`, `TorrentE2eTests`, `TorrentEngineTests`); Flutter 8/8 + 0 analyze errors.
+
+### Added — engine (`src/Nova.Engine/Torrent/`)
+- **Bencode codec (BEP-3)**: canonical, binary-safe (byte-string keys and values), lexicographic key sorting enforced at encode time (valid info-hash requirement), grammar-aware `MeasureFirstValue` for `[dict][raw bytes]` splits (tested against BEP-3's own example vectors).
+- **Metainfo**: `.torrent` parser (single- + multi-file, path-traversal sanitized), magnet URI parser (hex + base32 `urn:btih`), magnet builder, info-hash computation, and a `TorrentCreator` for building torrents from local files.
+- **HTTP tracker client (BEP-3)**: percent-encoded `info_hash`/`peer_id`, compact + dictionary peer lists, failure-reason propagation, `event` semantics (tested against a loopback tracker harness).
+- **UDP tracker client (BEP-15)**: connect/announce with transaction ids, connection-id caching + stale reconnect, `left`/`uploaded`/`downloaded` accounting (tested against a loopback UDP tracker).
+- **DHT node (BEP-5)**: KRPC ping/find_node/get_peers/announce_peer over UDP, 160-bit k-bucket routing table (8 per bucket, stale-node eviction), sender-bound rotating announce tokens, iterative get_peers lookup toward the info hash, standard router bootstrapping (`router.bittorrent.com` & co.); off by default in tests via `bt_dht=0`.
+- **Peer wire protocol (BEP-3)**: handshake, choke/unchoke/interested/not-interested/have/bitfield/request/piece/cancel, 16 KiB block pipeline (12 deep), keepalives; extension protocol handshake (BEP-10) with `metadata_size` advertisement and **ut_metadata (BEP-9)** for magnet metadata exchange — both client and server sides (we fetch AND serve metadata).
+- **Piece picker**: rarest-first with randomized tie-break, optional sequential mode, block-level in-flight deduplication, per-piece release/requeue, availability tracking from bitfields + have messages.
+- **TorrentSession orchestrator**: tracker + DHT + static-peer discovery, inbound listener (seeding), channel-buffered per-peer pumps (cancelling a channel read never kills a TCP stream), SHA-1 piece verification on read-back with automatic requeue of corrupt pieces, crash-safe resume via bitfield sidecar (`.novadl.bf`), metadata sidecar (`.torrent` per info-hash for magnet resume), multi-file split-on-completion, seeding with upload cap + `TorrentSeederRegistry` for post-completion serving.
+- **Engine integration**: `magnet:` URIs and local `.torrent` paths are first-class `add_download` URLs (`DownloadKind.Torrent`, schema validation extended), `TaskRunner` dispatch to `RunTorrentAsync` before HTTP probing, progress/quota/speed-meter wiring identical to FTP/SFTP, per-task `seed_after` flag, settings `bt_dht` / `bt_upload_cap` / `bt_listen_port` / `bt_listen` / `bt_metadata_timeout`, SQLite migration v8 (`bt_info_hash`, `seed_after`), `TaskSnapshot` + `bt_info_hash` + `seed_after` fields.
+
+### Added — UI (Flutter, EN + FA)
+- Add dialog accepts `magnet:` links and dropped `.torrent` files; magnet detection banner; "keep seeding after completion" toggle (FA translations included).
+- Clipboard monitor and drag & drop now recognize magnet links; task model carries `btInfoHash` / `seedAfter`.
+
+### Added — extensions (1.4.0)
+- "Download ALL links" page dialog now collects magnet: anchors alongside HTTP(S) links (both Chromium and Firefox builds).
+
+### Verified end-to-end (loopback-only swarms)
+- Full download from our own seeder via a local HTTP tracker — byte-exact, seeder upload accounting, temp + bitfield cleanup after completion.
+- Magnet task: metadata fetched via ut_metadata from the seeder, then downloaded byte-exact **through the real engine** (add → dispatch → DB → events).
+- Resume from a persisted bitfield downloads exactly the missing pieces (deterministic pre-seeded state).
+- Multi-downloader fan-out (3 concurrent) and completed-session seeding back to a second downloader.
+- Corrupt/garbage temp data is fully re-verified and re-downloaded.
+
 ## [1.3.0] — 2026-10-24
 
 **Beyond IDM — Market Parity** — closes the gaps that IDM never had but FDM / JDownloader 2 / aria2 / Motrix have (research matrix: `docs/FEATURE-GAP-2026.md`). C# suite grew 108 → 127 tests (+19 in `V13FeatureTests`); Flutter 8/8 + 0 analyze errors; smoke + parity E2E 12/12 + tarball clean-env PASS.

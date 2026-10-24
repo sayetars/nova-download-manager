@@ -117,6 +117,10 @@ abstract class S {
   String get expectedHashHint;
   String get sequentialDownload;
   String get sequentialHint;
+  String get seedAfterTorrent;
+  String get seedAfterTorrentHint;
+  String get magnetDetected;
+  String get torrentKindLabel;
   String get mirrorsOnePerLine;
   String get extractNow;
   String get convertNow;
@@ -602,6 +606,10 @@ class EnStrings implements S {
   @override String get expectedHashHint => 'sha256:… | sha1:… | md5:… | crc32:…';
   @override String get sequentialDownload => 'Download in order (media preview)';
   @override String get sequentialHint => 'Writes the file from the beginning first — useful to preview videos early';
+  @override String get seedAfterTorrent => 'Keep seeding after completion (BitTorrent)';
+  @override String get seedAfterTorrentHint => 'The file keeps being served to other peers until Nova closes';
+  @override String get magnetDetected => 'BitTorrent magnet link detected — metadata is fetched from the swarm';
+  @override String get torrentKindLabel => 'Torrent';
   @override String get mirrorsOnePerLine => 'Mirror URLs (downloaded in parallel) — one per line';
   @override String get extractNow => 'Extract';
   @override String get convertNow => 'Convert';
@@ -946,6 +954,10 @@ class FaStrings implements S {
   @override String get expectedHashHint => 'sha256:… | sha1:… | md5:… | crc32:…';
   @override String get sequentialDownload => 'دانلود به‌ترتیب (پیش‌نمایش رسانه)';
   @override String get sequentialHint => 'ابتدا از ابتدای فایل می‌نویسد — برای پیش‌نمایش زودهنگام ویدیو مناسب است';
+  @override String get seedAfterTorrent => 'بعد از اتمام، سیدینگ ادامه یابد (بیت‌تورنت)';
+  @override String get seedAfterTorrentHint => 'پس از اتمام دانلود، فایل در اختیار سایر همتاها قرار می‌گیرد تا نووا بسته شود';
+  @override String get magnetDetected => 'لینک مگنت بیت‌تورنت شناسایی شد — متادیتا از شبکه swarm دریافت می‌شود';
+  @override String get torrentKindLabel => 'تورنت';
   @override String get mirrorsOnePerLine => 'نشانی‌های آینه (به‌موازات دانلود می‌شوند) — هر خط یکی';
   @override String get extractNow => 'استخراج';
   @override String get convertNow => 'تبدیل';

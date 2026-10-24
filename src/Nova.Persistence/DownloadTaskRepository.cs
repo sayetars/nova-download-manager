@@ -22,13 +22,14 @@ public sealed class DownloadTaskRepository : IDownloadTaskRepository
                  retry_count, max_retries,
                  created_at, started_at, completed_at, segments_done, segments_total, mime_type,
                  referer, media_selection, file_kept, mirror_urls, start_at_ms, post_action,
-                 cookies, extra_headers, sequential, expected_hash, piece_hashes, convert_preset)
+                 cookies, extra_headers, sequential, expected_hash, piece_hashes, convert_preset,
+                 bt_info_hash, seed_after)
                 VALUES
                 (@key, @kind, @url, @eff, @name, @dir, @state, @prio, @queue, @cat, @total, @recv,
                  @etag, @lm, @sha, @valid, @segc, @maxc, @cap,
                  @retry, @maxr, @created, @started,
                  @completed, @segd, @segt, @mime, @ref, @sel, @kept, @mirrors, @startat, @postact,
-                 @cookies, @headers, @seq, @exphash, @pieces, @convpreset);
+                 @cookies, @headers, @seq, @exphash, @pieces, @convpreset, @btih, @seed);
                 SELECT last_insert_rowid();
                 """;
             BindTask(cmd, t);
@@ -55,7 +56,8 @@ public sealed class DownloadTaskRepository : IDownloadTaskRepository
                     referer=@ref, media_selection=@sel, file_kept=@kept,
                     mirror_urls=@mirrors, start_at_ms=@startat, post_action=@postact,
                     cookies=@cookies, extra_headers=@headers, sequential=@seq,
-                    expected_hash=@exphash, piece_hashes=@pieces, convert_preset=@convpreset
+                    expected_hash=@exphash, piece_hashes=@pieces, convert_preset=@convpreset,
+                    bt_info_hash=@btih, seed_after=@seed
                 WHERE id=@id;
                 """;
             BindTask(cmd, t);
@@ -216,6 +218,8 @@ public sealed class DownloadTaskRepository : IDownloadTaskRepository
         cmd.Parameters.AddValue("@exphash", t.ExpectedHash ?? "");
         cmd.Parameters.AddValue("@pieces", t.PieceHashes ?? "");
         cmd.Parameters.AddValue("@convpreset", t.ConvertPreset ?? "");
+        cmd.Parameters.AddValue("@btih", t.BtInfoHash ?? "");
+        cmd.Parameters.AddValue("@seed", t.SeedAfter ? 1 : 0);
     }
 
     private static DownloadTask? MapOne(SqliteDataReader r) => r.Read() ? Map(r) : null;
@@ -265,6 +269,8 @@ public sealed class DownloadTaskRepository : IDownloadTaskRepository
         ExpectedHash = r.IsDBNull(r.GetOrdinal("expected_hash")) ? null : r.GetString(r.GetOrdinal("expected_hash")),
         PieceHashes = r.IsDBNull(r.GetOrdinal("piece_hashes")) ? null : r.GetString(r.GetOrdinal("piece_hashes")),
         ConvertPreset = r.IsDBNull(r.GetOrdinal("convert_preset")) ? "" : r.GetString(r.GetOrdinal("convert_preset")),
+        BtInfoHash = r.IsDBNull(r.GetOrdinal("bt_info_hash")) ? "" : r.GetString(r.GetOrdinal("bt_info_hash")),
+        SeedAfter = !r.IsDBNull(r.GetOrdinal("seed_after")) && r.GetInt64(r.GetOrdinal("seed_after")) != 0,
     };
 
     private DownloadTask? QueryOne(string sql, Action<SqliteCommand> bind)

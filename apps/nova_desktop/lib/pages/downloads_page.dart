@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' as io;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -468,6 +469,7 @@ Future<void> showAddDownloadDialog(BuildContext context,
   var connections = 4;
   var downloadLater = false;
   var sequential = false;
+  var seedAfter = false;
   List<String>? previewUrls;
 
   await showDialog(
@@ -494,6 +496,20 @@ Future<void> showAddDownloadDialog(BuildContext context,
                   ),
                   onChanged: (v) => setState(() => previewUrls = null),
                 ),
+                if (urlCtrl.text.trim().startsWith('magnet:'))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      children: [
+                        Icon(Icons.hub_outlined,
+                            size: 16, color: Theme.of(context).colorScheme.primary),
+                        const SizedBox(width: 6),
+                        Expanded(
+                            child: Text(s.magnetDetected,
+                                style: Theme.of(context).textTheme.bodySmall)),
+                      ],
+                    ),
+                  ),
                 if (urlCtrl.text.contains('[') && previewUrls == null)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
@@ -603,6 +619,16 @@ Future<void> showAddDownloadDialog(BuildContext context,
                       value: sequential,
                       onChanged: (v) => setState(() => sequential = v),
                     ),
+                    if (urlCtrl.text.trim().startsWith('magnet:'))
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: Text(s.seedAfterTorrent),
+                        subtitle: Text(s.seedAfterTorrentHint,
+                            style: Theme.of(context).textTheme.bodySmall),
+                        value: seedAfter,
+                        onChanged: (v) => setState(() => seedAfter = v),
+                      ),
                   ],
                 ),
               ],
@@ -633,7 +659,16 @@ Future<void> showAddDownloadDialog(BuildContext context,
         urls = urls.first.split(RegExp(r'\s+')).where((u) => u.isNotEmpty).toList();
       }
       final valid = urls
-          .where((u) => u.startsWith('http://') || u.startsWith('https://') || u.startsWith('ftp://') || u.startsWith('ftps://') || u.startsWith('sftp://') || u.startsWith('dav://') || u.startsWith('davs://'))
+          .where((u) =>
+              u.startsWith('http://') ||
+              u.startsWith('https://') ||
+              u.startsWith('ftp://') ||
+              u.startsWith('ftps://') ||
+              u.startsWith('sftp://') ||
+              u.startsWith('dav://') ||
+              u.startsWith('davs://') ||
+              u.startsWith('magnet:') ||
+              (u.endsWith('.torrent') && io.File(u).existsSync()))
           .toList();
       if (valid.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.of(context).invalidUrl)));
@@ -662,6 +697,7 @@ Future<void> showAddDownloadDialog(BuildContext context,
           extraHeaders: headersCtrl.text.trim(),
           expectedHash: hashCtrl.text.trim(),
           sequential: sequential,
+          seedAfter: seedAfter && valid.first.startsWith('magnet:'),
         );
       } else {
         await notifier.addBatch(valid,
