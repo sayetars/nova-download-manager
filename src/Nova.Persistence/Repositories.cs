@@ -359,3 +359,148 @@ public sealed class SyncRuleRepository : ISyncRuleRepository
         }
     }
 }
+
+/// <summary>Feed-subscription persistence (v1.3.0: RSS/Atom auto-download).</summary>
+public sealed class FeedRuleRepository : IFeedRuleRepository
+{
+    private readonly NovaDatabase _db;
+    public FeedRuleRepository(NovaDatabase db) => _db = db;
+
+    private static FeedRule Map(Microsoft.Data.Sqlite.SqliteDataReader r) => new()
+    {
+        Id = r.GetInt64(0),
+        Name = r.GetString(1),
+        Url = r.GetString(2),
+        Filters = r.GetString(3),
+        DestinationDir = r.GetString(4),
+        Category = r.GetString(5),
+        IntervalMinutes = r.GetInt32(6),
+        Enabled = r.GetInt32(7) != 0,
+        LastCheckMs = r.GetInt64(8),
+        AutoStart = r.GetInt32(9) != 0,
+        MaxItems = r.GetInt32(10),
+    };
+
+    private const string Columns = "id, name, url, filters, destination_dir, category, interval_minutes, enabled, last_check_ms, auto_start, max_items";
+
+    public IReadOnlyList<FeedRule> GetAll()
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = $"SELECT {Columns} FROM feed_rule ORDER BY id";
+            using var r = cmd.ExecuteReader();
+            var list = new List<FeedRule>();
+            while (r.Read()) list.Add(Map(r));
+            return list;
+        }
+    }
+
+    public FeedRule? Get(long id)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = $"SELECT {Columns} FROM feed_rule WHERE id=@i";
+            cmd.Parameters.AddValue("@i", id);
+            using var r = cmd.ExecuteReader();
+            return r.Read() ? Map(r) : null;
+        }
+    }
+
+    private static void Bind(Microsoft.Data.Sqlite.SqliteCommand cmd, FeedRule rule)
+    {
+        cmd.Parameters.AddValue("@n", rule.Name ?? string.Empty);
+        cmd.Parameters.AddValue("@u", rule.Url ?? string.Empty);
+        cmd.Parameters.AddValue("@f", rule.Filters ?? string.Empty);
+        cmd.Parameters.AddValue("@d", rule.DestinationDir ?? string.Empty);
+        cmd.Parameters.AddValue("@c", rule.Category ?? "other");
+        cmd.Parameters.AddValue("@i", Math.Clamp(rule.IntervalMinutes, 1, 10_080));
+        cmd.Parameters.AddValue("@e", rule.Enabled ? 1 : 0);
+        cmd.Parameters.AddValue("@l", rule.LastCheckMs);
+        cmd.Parameters.AddValue("@a", rule.AutoStart ? 1 : 0);
+        cmd.Parameters.AddValue("@m", Math.Max(0, rule.MaxItems));
+    }
+
+    public long Insert(FeedRule rule)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = """
+                INSERT INTO feed_rule(name, url, filters, destination_dir, category, interval_minutes, enabled, last_check_ms, auto_start, max_items)
+                VALUES(@n,@u,@f,@d,@c,@i,@e,@l,@a,@m)
+                """;
+            Bind(cmd, rule);
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = "SELECT last_insert_rowid()";
+            return Convert.ToInt64(cmd.ExecuteScalar()!);
+        }
+    }
+
+    public void Update(FeedRule rule)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = """
+                UPDATE feed_rule SET name=@n, url=@u, filters=@f, destination_dir=@d, category=@c,
+                    interval_minutes=@i, enabled=@e, last_check_ms=@l, auto_start=@a, max_items=@m
+                WHERE id=@id
+                """;
+            Bind(cmd, rule);
+            cmd.Parameters.AddValue("@id", rule.Id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public void Delete(long id)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "DELETE FROM feed_seen WHERE feed_id=@i; DELETE FROM feed_rule WHERE id=@i;";
+            cmd.Parameters.AddValue("@i", id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public void SetLastCheck(long id, long atMs)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "UPDATE feed_rule SET last_check_ms=@l WHERE id=@i";
+            cmd.Parameters.AddValue("@l", atMs);
+            cmd.Parameters.AddValue("@i", id);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public IReadOnlySet<string> GetSeen(long feedId)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT item_id FROM feed_seen WHERE feed_id=@i";
+            cmd.Parameters.AddValue("@i", feedId);
+            using var r = cmd.ExecuteReader();
+            var set = new HashSet<string>();
+            while (r.Read()) set.Add(r.GetString(0));
+            return set;
+        }
+    }
+
+    public void MarkSeen(long feedId, string itemId, long atMs)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "INSERT OR IGNORE INTO feed_seen(feed_id, item_id, seen_ms) VALUES(@i,@t,@m)";
+            cmd.Parameters.AddValue("@i", feedId);
+            cmd.Parameters.AddValue("@t", itemId);
+            cmd.Parameters.AddValue("@m", atMs);
+            cmd.ExecuteNonQuery();
+        }
+    }
+}

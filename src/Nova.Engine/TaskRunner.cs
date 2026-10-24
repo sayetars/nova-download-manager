@@ -32,6 +32,7 @@ public sealed class TaskRunner
     private readonly string? _tempRoot;
     private readonly Action<long>? _quotaHook;
     private readonly Action<DownloadTask, IReadOnlyList<DownloadSegment>>? _publishLive;
+    private readonly Func<string, string?>? _settings;
     private long _lastLivePublishMs;
 
     public TaskRunner(HttpClient http, HttpProber prober, IDownloadTaskRepository tasks,
@@ -41,7 +42,8 @@ public sealed class TaskRunner
         Action<DownloadTask> persistTask, Action<DownloadTask> persistProgress,
         LoginVault? vault = null, Antivirus? antivirus = null, string? tempRoot = null,
         Action<long>? quotaHook = null,
-        Action<DownloadTask, IReadOnlyList<DownloadSegment>>? publishLive = null)
+        Action<DownloadTask, IReadOnlyList<DownloadSegment>>? publishLive = null,
+        Func<string, string?>? settings = null)
     {
         _http = http;
         _prober = prober;
@@ -59,9 +61,56 @@ public sealed class TaskRunner
         _tempRoot = tempRoot;
         _quotaHook = quotaHook;
         _publishLive = publishLive;
+        _settings = settings;
     }
 
     public SpeedMeter Speed { get; } = new();
+
+    private string? Setting(string key) => _settings?.Invoke(key);
+
+    /// <summary>
+    /// v1.3.0 multi-source pool (aria2/FDM parity): the file is fetched from the primary
+    /// URL AND the mirrors simultaneously — workers round-robin across healthy sources.
+    /// </summary>
+    private sealed class SourcePool
+    {
+        private readonly List<string> _items;
+        private readonly HashSet<string> _dead = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, int> _strikes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _lock = new();
+        private int _cursor;
+
+        public SourcePool(IEnumerable<string> urls)
+        {
+            _items = urls.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        public int Count { get { lock (_lock) return _items.Count; } }
+
+        public string Next()
+        {
+            lock (_lock)
+            {
+                var alive = _items.Where(u => !_dead.Contains(u)).ToList();
+                if (alive.Count == 0) return _items[0];   // last resort: try primary again
+                var url = alive[Math.Abs(_cursor) % alive.Count];
+                _cursor++;
+                return url;
+            }
+        }
+
+        public void Report(string url, bool ok)
+        {
+            lock (_lock)
+            {
+                if (ok) { _strikes.Remove(url); return; }
+                var n = _strikes.GetValueOrDefault(url) + 1;
+                _strikes[url] = n;
+                if (n >= 3 && _items.Count > 1 && _items.Count(u => !_dead.Contains(u)) > 1)
+                    _dead.Add(url);
+            }
+        }
+    }
 
     /// <summary>User pause (keep data). Engine hard-stop and user cancel arrive via RunAsync tokens.</summary>
     public CancellationTokenSource Pause { get; } = new();
@@ -82,7 +131,7 @@ public sealed class TaskRunner
             _persistTask(task);
 
             // ---- analyze / revalidate -------------------------------------
-            var probe = await _prober.ProbeAsync(task.EffectiveUrl ?? task.Url, task.Referer, ct);
+            var probe = await _prober.ProbeAsync(task.EffectiveUrl ?? task.Url, task.Referer, ct, task);
 
             bool validatorChanged = false;
             if (task.ReceivedBytes > 0)
@@ -104,12 +153,48 @@ public sealed class TaskRunner
             if (string.IsNullOrEmpty(task.Category) || task.Category == "other")
                 task.Category = Disk.GuessCategory(task.FileName, probe.ContentType);
 
+            // ---- v1.3.0: Metalink (XML + RFC 6249) + checksum sidecars --------
+            if (task.Kind == DownloadKind.File)
+            {
+                var probeWithTask = task;
+                var metalinkApplied = await TryApplyMetalinkAsync(task, probe, ct);
+                if (metalinkApplied)
+                {
+                    // re-probe the real file behind the metalink
+                    probe = await _prober.ProbeAsync(task.EffectiveUrl ?? task.Url, task.Referer, ct, probeWithTask);
+                    task.EffectiveUrl = probe.FinalUrl;
+                    task.Etag = probe.Etag;
+                    task.LastModified = probe.LastModified;
+                    task.MimeType = probe.ContentType;
+                    if (probe.ContentLength > 0) task.TotalBytes = probe.ContentLength;
+                }
+                else
+                {
+                    ApplyMetalinkHttp(task, probe);
+                    await TryApplySidecarAsync(task, ct);
+                }
+                _persistTask(task);
+            }
+
             // ---- dispatch ---------------------------------------------------
-            // FTP / FTPS (IDM parity)
+            // FTP / FTPS (IDM parity), SFTP (v1.3.0), WebDAV scheme rewrite (v1.3.0)
             var scheme = (task.EffectiveUrl ?? task.Url).Split(':')[0].ToLowerInvariant();
+            if (scheme is "dav" or "davs")
+            {
+                var davUrl = task.EffectiveUrl ?? task.Url;
+                var rewritten = (scheme == "dav" ? "http" : "https") + davUrl[scheme.Length..];
+                EngineLog.Info($"webdav: {davUrl} → {rewritten}");
+                task.Url = rewritten;
+                task.EffectiveUrl = null;
+            }
             if (scheme is "ftp" or "ftps")
             {
                 await RunFtpAsync(task, ct);
+                return;
+            }
+            if (scheme is "sftp")
+            {
+                await RunSftpAsync(task, ct);
                 return;
             }
 
@@ -175,11 +260,13 @@ public sealed class TaskRunner
             var concurrency = Math.Clamp(task.MaxConnections, 1, 32);
             // Dynamic IDM-style worker pool: N workers pull the largest remaining slice,
             // and on completion split the largest remaining slice when useful.
+            // v1.3.0: workers round-robin across the source pool (primary + mirrors) simultaneously.
             var workLock = new object();
             var pool = segments.ToList();
             var claimed = new HashSet<long>();   // shared: one owner per slice at a time
+            var sources = new SourcePool(BuildSources(task));
             var workers = Enumerable.Range(0, Math.Max(1, Math.Min(concurrency, Math.Max(1, pool.Count))))
-                .Select(_ => Task.Run(() => SegmentWorkerAsync(task, pool, dataFile, workLock, claimed, ct), ct))
+                .Select(_ => Task.Run(() => SegmentWorkerAsync(task, pool, sources, dataFile, workLock, claimed, ct), ct))
                 .ToArray();
 
             var lastPersist = Environment.TickCount64;
@@ -234,23 +321,43 @@ public sealed class TaskRunner
                 task.ReceivedBytes = task.TotalBytes;
             }
 
-            // ---- verify ----------------------------------------------------
-            if (!string.IsNullOrEmpty(task.ExpectedSha256))
+            // ---- verify (v1.3.0: piece repair → algo-qualified whole-file hash) ----
+            var pieces = PieceHashInfo.Parse(task.PieceHashes);
+            if (pieces is not null)
             {
                 SetState(task, DownloadState.Verifying, null);
                 _persistTask(task);
-                var actual = await Sha256FileAsync(dataFile.TempPath, ct);
-                if (!string.Equals(actual, task.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+                await RepairPiecesAsync(task, sources, dataFile, pieces, ct);
+            }
+
+            var hashReq = task.ExpectedHash;
+            if (string.IsNullOrWhiteSpace(hashReq) && !string.IsNullOrEmpty(task.ExpectedSha256))
+                hashReq = "sha256:" + task.ExpectedSha256;
+
+            if (!string.IsNullOrWhiteSpace(hashReq))
+            {
+                var parsed = Hashing.ParseQualified(hashReq);
+                if (parsed is null)
                 {
-                    _tasks.UpdateValidation(task.Id, ValidationStatus.Failed, actual);
-                    task.Validation = ValidationStatus.Failed;
-                    Fail(task, new NovaError("hash_mismatch", ErrorCategory.HashMismatch,
-                        "The downloaded file does not match the expected SHA-256."));
-                    dataFile.AbandonTemp();
-                    return;
+                    EngineLog.Warn($"verify[{task.TaskKey}]: unsupported hash format — skipped");
                 }
-                _tasks.UpdateValidation(task.Id, ValidationStatus.Passed, actual);
-                task.Validation = ValidationStatus.Passed;
+                else
+                {
+                    SetState(task, DownloadState.Verifying, null);
+                    _persistTask(task);
+                    var (ok, actual) = await Hashing.VerifyFileAsync(dataFile.TempPath, parsed.Value.Algo, parsed.Value.Hex, ct);
+                    if (!ok)
+                    {
+                        _tasks.UpdateValidation(task.Id, ValidationStatus.Failed, actual);
+                        task.Validation = ValidationStatus.Failed;
+                        Fail(task, new NovaError("hash_mismatch", ErrorCategory.HashMismatch,
+                            $"The downloaded file does not match the expected {parsed.Value.Algo.ToUpperInvariant()} hash."));
+                        dataFile.AbandonTemp();
+                        return;
+                    }
+                    _tasks.UpdateValidation(task.Id, ValidationStatus.Passed, actual);
+                    task.Validation = ValidationStatus.Passed;
+                }
             }
 
             // ---- finalize --------------------------------------------------
@@ -270,6 +377,27 @@ public sealed class TaskRunner
                         $"The antivirus scanner flagged this file: {scan.Details}"), retryable: false);
                     return;
                 }
+            }
+
+            // ---- v1.3.0: auto-extract + convert post-steps -------------------
+            if (Setting("extract.auto") == "true" && ArchiveTools.IsArchive(finalPath))
+            {
+                SetState(task, DownloadState.Verifying, null);
+                _persistTask(task);
+                var dest = Path.Combine(task.DestinationDir, Path.GetFileNameWithoutExtension(finalPath) + "_files");
+                var xr = ArchiveTools.Extract(finalPath, dest, ct);
+                EngineLog.Info($"extract[{task.TaskKey}]: {xr.Tool}: {xr.Message}");
+                if (xr.Ok && Setting("extract.delete_archive") == "true")
+                {
+                    try { File.Delete(finalPath); } catch { /* best effort */ }
+                }
+            }
+            if (!string.IsNullOrEmpty(task.ConvertPreset) && ArchiveTools.IsValidPreset(task.ConvertPreset))
+            {
+                SetState(task, DownloadState.Verifying, null);
+                _persistTask(task);
+                var cr = ArchiveTools.Convert(finalPath, task.ConvertPreset, Setting("ffmpeg.path"), ct);
+                EngineLog.Info($"convert[{task.TaskKey}]: {cr.Message}");
             }
 
             task.CompletedAt = DateTimeOffset.UtcNow;
@@ -427,31 +555,70 @@ public sealed class TaskRunner
     /// remaining slice so fast workers keep all connections saturated.
     /// A slice is owned by exactly one worker at a time (claim set).
     /// </summary>
-    private async Task SegmentWorkerAsync(DownloadTask task, List<DownloadSegment> pool,
+    private async Task SegmentWorkerAsync(DownloadTask task, List<DownloadSegment> pool, SourcePool sources,
         DownloadDataFile file, object workLock, HashSet<long> claimed, CancellationToken ct)
     {
         var limiters = new[] { _globalLimiter(), _taskLimiter() }.Where(l => l is not null).ToArray()!;
+        var consecutiveFailures = 0;
 
         while (!ct.IsCancellationRequested)
         {
             DownloadSegment? seg;
             lock (workLock)
             {
-                seg = pool.Where(s => !IsSliceDone(task, s) && !claimed.Contains(s.Id))
-                    .OrderByDescending(Remaining)
-                    .FirstOrDefault();
+                var pending = pool.Where(s => !IsSliceDone(task, s) && !claimed.Contains(s.Id));
+                seg = task.Sequential
+                    ? pending.OrderBy(s => s.Start).FirstOrDefault()      // inorder (aria2 stream-piece parity)
+                    : pending.OrderByDescending(Remaining).FirstOrDefault();
                 if (seg is null) return;   // all slices complete or owned
                 claimed.Add(seg.Id);
             }
             try
             {
-                await DownloadSliceAsync(task, pool, seg, file, limiters, ct);
+                if (await DownloadSliceAsync(task, pool, sources, seg, file, limiters, ct))
+                    consecutiveFailures = 0;
+            }
+            catch (NovaHttpException hex) when (sources.Count > 1 && hex.Category != ErrorCategory.HashMismatch)
+            {
+                // multi-source resilience: let the remaining mirrors absorb this failure.
+                consecutiveFailures++;
+                EngineLog.Warn($"source failure ({hex.Code}) — {consecutiveFailures} consecutive");
+                if (consecutiveFailures > sources.Count * 2) throw;
             }
             finally
             {
                 lock (workLock) claimed.Remove(seg.Id);
-                TryDynamicSplit(task, pool, workLock);
+                if (!task.Sequential) TryDynamicSplit(task, pool, workLock);
             }
+        }
+    }
+
+    /// <summary>HTTP(S) sources for multi-source download (primary first, then mirrors).</summary>
+    private static List<string> BuildSources(DownloadTask task)
+    {
+        var list = new List<string> { task.EffectiveUrl ?? task.Url };
+        list.AddRange(task.Mirrors);
+        return list.Where(u => Uri.TryCreate(u, UriKind.Absolute, out var uri)
+                               && uri.Scheme is "http" or "https").ToList();
+    }
+
+    /// <summary>Cookies + per-task extra headers on every task HTTP request (v1.3.0).</summary>
+    internal static void ApplyTaskHeaders(HttpRequestMessage req, DownloadTask task)
+    {
+        if (!string.IsNullOrWhiteSpace(task.Cookies))
+            req.Headers.TryAddWithoutValidation("Cookie", task.Cookies.Trim());
+        if (!string.IsNullOrWhiteSpace(task.ExtraHeaders))
+        {
+            try
+            {
+                var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(task.ExtraHeaders,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (dict is not null)
+                    foreach (var (k, v) in dict)
+                        if (!string.IsNullOrWhiteSpace(k) && v is not null)
+                            req.Headers.TryAddWithoutValidation(k, v);
+            }
+            catch { /* malformed header JSON is rejected at add-time */ }
         }
     }
 
@@ -491,12 +658,14 @@ public sealed class TaskRunner
         }
     }
 
-    private async Task DownloadSliceAsync(DownloadTask task, List<DownloadSegment> pool, DownloadSegment seg,
+    /// <summary>Download one slice from the source pool. Returns true when the slice finished.</summary>
+    private async Task<bool> DownloadSliceAsync(DownloadTask task, List<DownloadSegment> pool, SourcePool sources, DownloadSegment seg,
         DownloadDataFile file, RateLimiter[] limiters, CancellationToken ct)
     {
         var vaultTried = false;
         while (!ct.IsCancellationRequested)
         {
+            var source = sources.Next();
             var knownLength = task.TotalBytes >= 0 && seg.End >= 0 && seg.Length > 0;
             if (knownLength && seg.IsComplete) break;
 
@@ -505,54 +674,72 @@ public sealed class TaskRunner
                 ? Math.Min(seg.Length - seg.Received, 8L * 1024 * 1024)
                 : -1L; // unknown total: stream until EOF
 
-            using var req = new HttpRequestMessage(HttpMethod.Get, task.EffectiveUrl ?? task.Url);
+            using var req = new HttpRequestMessage(HttpMethod.Get, source);
             if (knownLength)
                 req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, sliceStart + want - 1);
             else if (seg.Received > 0)
                 req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, null);
             HttpProber.AddDefaultHeaders(req, task.Referer);
+            ApplyTaskHeaders(req, task);
 
-            // mirror rotation: on hard failures the outer retry path switches task.EffectiveUrl (see MirrorFailover below)
-            using var resp = await _prober.SendGuardedAsync(req, ct);
-
-            if (resp.StatusCode == HttpStatusCode.Unauthorized && !vaultTried && _vault is not null)
+            HttpResponseMessage resp;
+            try
             {
-                vaultTried = true;
-                var cred = _vault.Find(task.Url);
-                if (cred is not null)
+                resp = await _prober.SendGuardedAsync(req, ct);
+                sources.Report(source, true);
+            }
+            catch (NovaHttpException)
+            {
+                sources.Report(source, false);
+                throw;
+            }
+
+            using (resp)
+            {
+                if (resp.StatusCode == HttpStatusCode.Unauthorized && !vaultTried && _vault is not null)
                 {
-                    // retry once with vault credentials attached (Basic scheme)
-                    using var retryReq = new HttpRequestMessage(HttpMethod.Get, task.EffectiveUrl ?? task.Url);
-                    if (knownLength)
-                        retryReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, sliceStart + want - 1);
-                    else if (seg.Received > 0)
-                        retryReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, null);
-                    HttpProber.AddDefaultHeaders(retryReq, task.Referer);
-                    retryReq.Headers.TryAddWithoutValidation("Authorization", new TaskCredentials(cred.UserName, cred.Password).BasicHeader());
-                    using var retryResp = await _prober.SendGuardedAsync(retryReq, ct);
-                    await DrainSliceAsync(task, pool, seg, retryResp, file, knownLength, want, limiters, ct);
-                    if (knownLength && seg.IsComplete) break;
-                    continue;
+                    vaultTried = true;
+                    var cred = _vault.Find(task.Url);
+                    if (cred is not null)
+                    {
+                        // retry once with vault credentials attached (Basic scheme)
+                        using var retryReq = new HttpRequestMessage(HttpMethod.Get, source);
+                        if (knownLength)
+                            retryReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, sliceStart + want - 1);
+                        else if (seg.Received > 0)
+                            retryReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, null);
+                        HttpProber.AddDefaultHeaders(retryReq, task.Referer);
+                        ApplyTaskHeaders(retryReq, task);
+                        retryReq.Headers.TryAddWithoutValidation("Authorization", new TaskCredentials(cred.UserName, cred.Password).BasicHeader());
+                        using var retryResp = await _prober.SendGuardedAsync(retryReq, ct);
+                        await DrainSliceAsync(task, pool, seg, retryResp, file, knownLength, want, limiters, ct);
+                        if (knownLength && seg.IsComplete) break;
+                        continue;
+                    }
                 }
+
+                if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
+                {
+                    // Might mean the file is actually already complete for this segment → verify size.
+                    if (task.TotalBytes >= 0 && sliceStart == task.TotalBytes) { seg.Received = seg.Length; break; }
+                    throw new NovaHttpException("http_416", ErrorCategory.Http,
+                        "The server refused the requested byte range.", task.Url);
+                }
+
+                if (!resp.IsSuccessStatusCode && resp.StatusCode != HttpStatusCode.PartialContent)
+                    throw NovaHttpException.FromStatus(resp.StatusCode, source);
+
+                await DrainSliceAsync(task, pool, seg, resp, file, knownLength, want, limiters, ct);
             }
-
-            if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
-            {
-                // Might mean the file is actually already complete for this segment → verify size.
-                if (task.TotalBytes >= 0 && sliceStart == task.TotalBytes) { seg.Received = seg.Length; break; }
-                throw new NovaHttpException("http_416", ErrorCategory.Http,
-                    "The server refused the requested byte range.", task.Url);
-            }
-
-            if (!resp.IsSuccessStatusCode && resp.StatusCode != HttpStatusCode.PartialContent)
-                throw NovaHttpException.FromStatus(resp.StatusCode, task.Url);
-
-            await DrainSliceAsync(task, pool, seg, resp, file, knownLength, want, limiters, ct);
 
             if (!knownLength && seg.End >= 0) break; // reached EOF
             if (knownLength && seg.IsComplete) break;
         }
+        return knownSliceDone(task, seg);
     }
+
+    private static bool knownSliceDone(DownloadTask task, DownloadSegment seg)
+        => task.TotalBytes < 0 || seg.End < 0 || seg.Length <= 0 ? false : seg.IsComplete;
 
     private async Task DrainSliceAsync(DownloadTask task, List<DownloadSegment> pool, DownloadSegment seg, HttpResponseMessage resp,
         DownloadDataFile file, bool knownLength, long want, RateLimiter[] limiters, CancellationToken ct)
@@ -603,6 +790,193 @@ public sealed class TaskRunner
             _events.MaybeProgress(task, Speed.SpeedBps, 500);
             if (knownLength && seg.IsComplete) break;
         }
+    }
+
+    // ---- v1.3.0: Metalink + sidecar + piece repair + SFTP ---------------------
+
+    /// <summary>Expands a Metalink task (XML doc / .meta4 / metalink content-type) into mirrors + hashes.</summary>
+    private async Task<bool> TryApplyMetalinkAsync(DownloadTask task, HttpProbeResult probe, CancellationToken ct)
+    {
+        try
+        {
+            if (!Metalink.LooksLikeMetalink(task.EffectiveUrl ?? task.Url, probe.ContentType)) return false;
+            if (task.ReceivedBytes > 0) return false;   // resuming the meta itself — leave alone
+
+            using var req = new HttpRequestMessage(HttpMethod.Get, task.EffectiveUrl ?? task.Url);
+            HttpProber.AddDefaultHeaders(req, task.Referer);
+            ApplyTaskHeaders(req, task);
+            using var resp = await _prober.SendGuardedAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return false;
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            if (body.Length > 4 * 1024 * 1024) return false;
+            var meta = Metalink.ParseXml(body);
+            if (meta is null) return false;
+
+            var ordered = meta.Mirrors.OrderBy(m => m.Priority).Select(m => m.Url).ToList();
+            if (ordered.Count == 0) return false;
+
+            task.Url = ordered[0];
+            task.MirrorUrls = string.Join('\n', ordered.Skip(1));
+            task.EffectiveUrl = null;
+            task.FileName = FilenamePolicy.SanitizeFileName(meta.FileName);
+            if (meta.Size > 0) task.TotalBytes = meta.Size;
+            var algo = new[] { "sha256", "sha1", "md5", "crc32" }.FirstOrDefault(a => meta.Hashes.ContainsKey(a));
+            if (algo is not null) task.ExpectedHash = $"{algo}:{meta.Hashes[algo]}";
+            if (meta.Pieces is not null) task.PieceHashes = meta.Pieces.ToJson();
+            var maxConn = meta.Mirrors.OrderBy(m => m.Priority).Select(m => m.MaxConnections).FirstOrDefault(v => v.HasValue);
+            if (maxConn is { } mc && mc > 0) task.MaxConnections = Math.Clamp(mc, 1, 32);
+            EngineLog.Info($"metalink[{task.TaskKey}]: {ordered.Count} mirror(s), hash={algo ?? "none"}");
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            EngineLog.Warn($"metalink[{task.TaskKey}]: {ex.Message} — falling back to plain download");
+            return false;
+        }
+    }
+
+    /// <summary>RFC 6249 Metalink/HTTP: mirrors from Link rel=duplicate + Digest instance hashes.</summary>
+    private void ApplyMetalinkHttp(DownloadTask task, HttpProbeResult probe)
+    {
+        try
+        {
+            if (probe.LinkHeaders.Count == 0 && probe.DigestHeader is null) return;
+            var parsed = Metalink.ParseMetalinkHttp(probe.LinkHeaders, probe.DigestHeader);
+            if (parsed is null) return;
+            var (mirrors, hashes) = parsed.Value;
+            if (mirrors.Count > 0)
+            {
+                var merged = task.Mirrors
+                    .Concat(mirrors.OrderBy(m => m.Priority).Select(m => m.Url))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Where(u => !string.Equals(u, task.EffectiveUrl ?? task.Url, StringComparison.OrdinalIgnoreCase));
+                task.MirrorUrls = string.Join('\n', merged);
+                EngineLog.Info($"metalink/http[{task.TaskKey}]: +{mirrors.Count} mirror(s)");
+            }
+            var algo = new[] { "sha256", "sha1", "md5", "crc32" }.FirstOrDefault(a => hashes.ContainsKey(a));
+            if (algo is not null && task.ExpectedHash is null && string.IsNullOrEmpty(task.ExpectedSha256))
+                task.ExpectedHash = $"{algo}:{hashes[algo]}";
+        }
+        catch (Exception ex)
+        {
+            EngineLog.Warn($"metalink/http[{task.TaskKey}]: {ex.Message}");
+        }
+    }
+
+    /// <summary>Best-effort checksum sidecar discovery (.sha256/.md5/.sfv next to the file URL).</summary>
+    private async Task TryApplySidecarAsync(DownloadTask task, CancellationToken ct)
+    {
+        try
+        {
+            if (Setting("engine.sidecar_verify") == "false") return;
+            if (task.ExpectedHash is not null || !string.IsNullOrEmpty(task.ExpectedSha256)) return;
+            var url = task.EffectiveUrl ?? task.Url;
+            if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return;
+            var found = await Metalink.FetchSidecarAsync(_http, url, task.FileName, ct);
+            if (found is not null)
+            {
+                task.ExpectedHash = $"{found.Value.Algo}:{found.Value.Hex}";
+                EngineLog.Info($"sidecar[{task.TaskKey}]: {found.Value.Algo} discovered");
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { /* sidecar probing is best-effort by design */ }
+    }
+
+    /// <summary>Metalink piece-hash verification + in-place repair (aria2 --check-integrity parity).</summary>
+    private async Task RepairPiecesAsync(DownloadTask task, SourcePool sources, DownloadDataFile file,
+        PieceHashInfo pieces, CancellationToken ct)
+    {
+        for (var pass = 1; pass <= 2; pass++)
+        {
+            var bad = await FindBadPiecesAsync(file.TempPath, pieces, task.TotalBytes, ct);
+            if (bad.Count == 0) return;
+            EngineLog.Warn($"piece verify[{task.TaskKey}]: {bad.Count} damaged piece(s) — repair pass {pass}");
+            foreach (var idx in bad)
+            {
+                if (ct.IsCancellationRequested) return;
+                var start = (long)idx * pieces.PieceSize;
+                var length = Math.Min(pieces.PieceSize, task.TotalBytes - start);
+                if (length <= 0) continue;
+                var buf = await FetchRangeAsync(sources.Next(), start, length, task, ct);
+                await file.WriteAsync(start, buf, ct);
+            }
+        }
+
+        var remaining = await FindBadPiecesAsync(file.TempPath, pieces, task.TotalBytes, ct);
+        if (remaining.Count > 0)
+            throw new NovaHttpException("piece_verify_failed", ErrorCategory.HashMismatch,
+                "Some parts of the file could not be repaired after verification.", retryable: false);
+    }
+
+    private static async Task<List<int>> FindBadPiecesAsync(string path, PieceHashInfo pieces, long totalBytes, CancellationToken ct)
+    {
+        var bad = new List<int>();
+        if (!File.Exists(path)) return bad;
+        await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
+            bufferSize: 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var buf = new byte[pieces.PieceSize];
+        for (var i = 0; i < pieces.Hashes.Count; i++)
+        {
+            var pieceStart = (long)i * pieces.PieceSize;
+            if (totalBytes > 0 && pieceStart >= totalBytes) break;
+            var read = 0;
+            while (read < buf.Length)
+            {
+                var n = await fs.ReadAsync(buf.AsMemory(read), ct);
+                if (n <= 0) break;
+                read += n;
+            }
+            if (read == 0) break;
+            var actual = await Hashing.ComputeAsync(new MemoryStream(buf, 0, read, writable: false), pieces.Algo, ct);
+            if (!string.Equals(actual, pieces.Hashes[i], StringComparison.OrdinalIgnoreCase))
+                bad.Add(i);
+        }
+        return bad;
+    }
+
+    private async Task<byte[]> FetchRangeAsync(string url, long start, long length, DownloadTask task, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(start, start + length - 1);
+        HttpProber.AddDefaultHeaders(req, task.Referer);
+        ApplyTaskHeaders(req, task);
+        using var resp = await _prober.SendGuardedAsync(req, ct);
+        if (!resp.IsSuccessStatusCode && resp.StatusCode != HttpStatusCode.PartialContent)
+            throw NovaHttpException.FromStatus(resp.StatusCode, url);
+        var data = new byte[length];
+        var read = 0;
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        while (read < length)
+        {
+            var n = await stream.ReadAsync(data.AsMemory(read), ct);
+            if (n <= 0) break;
+            read += n;
+        }
+        if (read < length)
+            throw new NovaHttpException("short_read", ErrorCategory.Network,
+                "Repair fetch returned fewer bytes than requested.");
+        return data;
+    }
+
+    /// <summary>SFTP path (v1.3.0): SSH.NET multi-connection segmented download.</summary>
+    private async Task RunSftpAsync(DownloadTask task, CancellationToken ct)
+    {
+        SetState(task, DownloadState.Downloading, null);
+        _persistTask(task);
+        var creds = _vault?.Find(task.Url) is { } v ? new TaskCredentials(v.UserName, v.Password) : null;
+        var finalPath = await SftpTask.RunAsync(task, creds, (delta, rate) =>
+        {
+            if (delta > 0) { Interlocked.Add(ref _runReceived, delta); Speed.Add(delta); _quotaHook?.Invoke(delta); }
+            _events.MaybeProgress(task, rate > 0 ? rate : Speed.SpeedBps, 500);
+        }, ct);
+
+        task.FileName = Path.GetFileName(finalPath);
+        task.CompletedAt = DateTimeOffset.UtcNow;
+        SetState(task, DownloadState.Completed, null);
+        _persistTask(task);
+        _events.Completed(task, finalPath);
     }
 
     /// <summary>FTP/FTPS path: shares the crash-safe temp/final flow + progress events.</summary>

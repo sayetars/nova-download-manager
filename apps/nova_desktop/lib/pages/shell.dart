@@ -11,6 +11,7 @@ import '../core/theme.dart';
 import '../providers/engine.dart' as prov;
 import 'browser_page.dart';
 import 'downloads_page.dart';
+import 'feeds_page.dart';
 import 'grabber_page.dart';
 import 'history_page.dart';
 import 'overview_page.dart';
@@ -29,6 +30,7 @@ enum NavSection {
   queues,
   scheduler,
   sync,
+  feeds,
   grabber,
   browser,
   history,
@@ -241,6 +243,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       _NavItem(NavSection.queues, Icons.account_tree_outlined, Icons.account_tree, s.queues, null),
       _NavItem(NavSection.scheduler, Icons.alarm_outlined, Icons.alarm, s.scheduler, null),
       _NavItem(NavSection.sync, Icons.sync_outlined, Icons.sync, s.syncRules, null),
+      _NavItem(NavSection.feeds, Icons.rss_feed_outlined, Icons.rss_feed, s.feeds, null),
       _NavItem(NavSection.grabber, Icons.travel_explore_outlined, Icons.travel_explore, s.grabber, null),
       _NavItem(NavSection.browser, Icons.extension_outlined, Icons.extension, s.browserIntegration, null),
       _NavItem(NavSection.history, Icons.history_outlined, Icons.history, s.history, null),
@@ -382,6 +385,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
         NavSection.queues => s.queues,
         NavSection.scheduler => s.scheduler,
         NavSection.sync => s.syncRules,
+        NavSection.feeds => s.feeds,
         NavSection.grabber => s.grabber,
         NavSection.browser => s.browserIntegration,
         NavSection.history => s.history,
@@ -528,6 +532,7 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       NavSection.queues => const QueuesPage(),
       NavSection.scheduler => const SchedulerPage(),
       NavSection.sync => const SyncRulesPage(),
+      NavSection.feeds => const FeedsPage(),
       NavSection.grabber => const GrabberPage(),
       NavSection.browser => const BrowserIntegrationPage(),
       NavSection.history => HistoryPage(search: _search),

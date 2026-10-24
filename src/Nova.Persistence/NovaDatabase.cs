@@ -46,6 +46,7 @@ public sealed class NovaDatabase : IAsyncDisposable
         if (SchemaVersion < 4) { RunMigration(4, Sql.Migration4); SchemaVersion = 4; }
         if (SchemaVersion < 5) { RunMigration(5, Sql.Migration5); SchemaVersion = 5; }
         if (SchemaVersion < 6) { RunMigration(6, Sql.Migration6); SchemaVersion = 6; }
+        if (SchemaVersion < 7) { RunMigration(7, Sql.Migration7); SchemaVersion = 7; }
     }
 
     private void RunMigration(int version, string sql)
@@ -285,6 +286,34 @@ internal static class Sql
             etag TEXT,
             last_modified TEXT,
             PRIMARY KEY (rule_id, url)
+        );
+        """;
+
+    public const string Migration7 = """
+        ALTER TABLE download_task ADD COLUMN cookies TEXT NOT NULL DEFAULT '';
+        ALTER TABLE download_task ADD COLUMN extra_headers TEXT NOT NULL DEFAULT '';
+        ALTER TABLE download_task ADD COLUMN sequential INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE download_task ADD COLUMN expected_hash TEXT NOT NULL DEFAULT '';
+        ALTER TABLE download_task ADD COLUMN piece_hashes TEXT NOT NULL DEFAULT '';
+        ALTER TABLE download_task ADD COLUMN convert_preset TEXT NOT NULL DEFAULT '';
+        CREATE TABLE IF NOT EXISTS feed_rule (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            filters TEXT NOT NULL DEFAULT '',
+            destination_dir TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT 'other',
+            interval_minutes INTEGER NOT NULL DEFAULT 30,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            last_check_ms INTEGER NOT NULL DEFAULT 0,
+            auto_start INTEGER NOT NULL DEFAULT 1,
+            max_items INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS feed_seen (
+            feed_id INTEGER NOT NULL REFERENCES feed_rule(id) ON DELETE CASCADE,
+            item_id TEXT NOT NULL,
+            seen_ms INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (feed_id, item_id)
         );
         """;
 }

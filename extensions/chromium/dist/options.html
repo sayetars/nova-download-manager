@@ -71,7 +71,14 @@
 <section>
   <h2>Site lists</h2>
   <label><span class="grow">Allowlist (hosts, one per line — empty = all sites)</span></label>
-  <textarea id="allowlist" placeholder="example.com&#10;*.cdn.example.org"></textarea>
+  
+  <label class="row">
+    <input type="checkbox" id="passCookies" />
+    <span>
+      <strong>Send site cookies with downloads</strong><br />
+      <small>Opt-in. Lets Nova fetch files behind logins; cookie values are sent only to the local engine. / ارسال کوکی‌های سایت با دانلودها (اختیاری)</small>
+    </span>
+  </label><textarea id="allowlist" placeholder="example.com&#10;*.cdn.example.org"></textarea>
   <label><span class="grow">Blocklist (hosts, one per line)</span></label>
   <textarea id="blocklist" placeholder="ads.example.com"></textarea>
 </section>

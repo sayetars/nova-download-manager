@@ -68,6 +68,24 @@ function scheduleReconnect(): void {
 const inflight: { res: (v: BgResponse) => void }[] = [];
 let lastHelloResult: HostMessageIn | null = null;
 
+/**
+ * v1.3.0 — opt-in cookie pass-through: when the user enables it in Nova options,
+ * the site's cookies for the download URL ride along with the add_download request
+ * so login-gated files (premium hosts, SSO portals) can be fetched by the engine.
+ * Values are never logged and only ever sent to the local engine over the pipe.
+ */
+async function cookieHeaderFor(url: string): Promise<string | undefined> {
+  try {
+    const s = await loadSettings();
+    if (!s.passCookies || !/^https?:/i.test(url)) return undefined;
+    const jars = await browser.cookies.getAll({ url });
+    if (!jars || jars.length === 0) return undefined;
+    return jars.map((c) => `${c.name}=${c.value}`).join('; ');
+  } catch {
+    return undefined;
+  }
+}
+
 function postToHost(msg: unknown): Promise<BgResponse> {
   return new Promise((resolve) => {
     if (!port) {
@@ -191,6 +209,7 @@ async function handle(msg: BgRequest, sender?: RuntimeSender): Promise<BgRespons
     }
     case 'add-download': {
       if (!s.enabled) return { ok: false, error: { code: 'disabled', message: 'Nova is disabled' } };
+      const cookies = await cookieHeaderFor(msg.url);
       const r = await postToHost({
         type: 'add_download',
         payload: {
@@ -199,6 +218,7 @@ async function handle(msg: BgRequest, sender?: RuntimeSender): Promise<BgRespons
           file_name: msg.fileName,
           media_selection: msg.mediaSelection,
           referer: msg.referer,
+          ...(cookies ? { cookies } : {}),
           auto_start: true,
         },
       });

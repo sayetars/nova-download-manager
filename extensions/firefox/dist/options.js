@@ -13,6 +13,7 @@ const DEFAULTS = {
   blocklist: [],
   interceptKey: 'alt',
   preventKey: 'none',
+  passCookies: false,
 };
 
 let saving = null;
@@ -26,6 +27,7 @@ function load() {
     $('preferredQuality').value = s.preferredQuality;
     $('interceptKey').value = s.interceptKey;
     $('preventKey').value = s.preventKey;
+    $('passCookies').checked = s.passCookies === true;
     $('allowlist').value = (s.allowlist || []).join('\n');
     $('blocklist').value = (s.blocklist || []).join('\n');
   });
@@ -39,6 +41,7 @@ function save() {
     preferredQuality: $('preferredQuality').value,
     interceptKey: $('interceptKey').value,
     preventKey: $('preventKey').value,
+    passCookies: $('passCookies').checked === true,
     allowlist: $('allowlist').value.split('\n').map((x) => x.trim()).filter(Boolean),
     blocklist: $('blocklist').value.split('\n').map((x) => x.trim()).filter(Boolean),
   };
@@ -53,7 +56,7 @@ function save() {
 }
 
 document.addEventListener('DOMContentLoaded', load);
-for (const id of ['enabled', 'showOnHover', 'interceptDownloads', 'preferredQuality', 'interceptKey', 'preventKey', 'allowlist', 'blocklist']) {
+for (const id of ['enabled', 'showOnHover', 'interceptDownloads', 'preferredQuality', 'interceptKey', 'preventKey', 'passCookies', 'allowlist', 'blocklist']) {
   $(id).addEventListener('change', save);
   $(id).addEventListener('input', save);
 }

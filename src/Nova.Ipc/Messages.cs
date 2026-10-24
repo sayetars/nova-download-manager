@@ -35,6 +35,18 @@ public sealed class AddDownloadRequest
     public long StartAtMs { get; set; }
     /// <summary>Per-task post-completion action: "" | exit | shutdown | hibernate | sleep | logoff.</summary>
     public string? PostAction { get; set; }
+    /// <summary>v1.3.0: cookie header ("k=v; k2=v2") — opt-in, applied to every request of this task.</summary>
+    public string? Cookies { get; set; }
+    /// <summary>v1.3.0: extra HTTP headers JSON ({"Name":"value"}).</summary>
+    public string? ExtraHeaders { get; set; }
+    /// <summary>v1.3.0: sequential (in-order) segment allocation — partial media preview.</summary>
+    public bool Sequential { get; set; }
+    /// <summary>v1.3.0: algo-qualified expected hash ("sha256:hex" | "sha1:hex" | "md5:hex" | "crc32:hex").</summary>
+    public string? ExpectedHash { get; set; }
+    /// <summary>v1.3.0: Metalink piece hashes JSON (repair-capable integrity).</summary>
+    public string? PieceHashes { get; set; }
+    /// <summary>v1.3.0: post-download conversion preset ("" | mp3 | remux).</summary>
+    public string? ConvertPreset { get; set; }
 }
 
 public sealed class BatchAddRequest
@@ -55,6 +67,16 @@ public sealed class UpdateTaskRequest
     public long? StartAtMs { get; set; }
     public string? PostAction { get; set; }
     public List<string>? Mirrors { get; set; }
+    /// <summary>v1.3.0: replace cookie header (empty string clears).</summary>
+    public string? Cookies { get; set; }
+    /// <summary>v1.3.0: replace extra headers JSON (empty string clears).</summary>
+    public string? ExtraHeaders { get; set; }
+    /// <summary>v1.3.0: toggle sequential allocation.</summary>
+    public bool? Sequential { get; set; }
+    /// <summary>v1.3.0: replace expected hash (empty string clears).</summary>
+    public string? ExpectedHash { get; set; }
+    /// <summary>v1.3.0: replace conversion preset ("" | mp3 | remux).</summary>
+    public string? ConvertPreset { get; set; }
 }
 
 /// <summary>FTP directory browser (IDM parity: FTP explorer).</summary>
@@ -216,6 +238,48 @@ public sealed class DeleteSyncRuleRequest
     public long Id { get; set; }
 }
 
+/// <summary>RSS/Atom feed subscriptions (v1.3.0).</summary>
+public sealed class SaveFeedRuleRequest
+{
+    public long? Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    /// <summary>Comma-separated title/URL substrings; empty = accept all.</summary>
+    public string Filters { get; set; } = "";
+    public string DestinationDir { get; set; } = "";
+    public string Category { get; set; } = "other";
+    public int IntervalMinutes { get; set; } = 30;
+    public bool Enabled { get; set; } = true;
+    public bool AutoStart { get; set; } = true;
+    public int MaxItems { get; set; }
+}
+
+public sealed class RunFeedRequest
+{
+    public long Id { get; set; }
+}
+
+public sealed class DeleteFeedRuleRequest
+{
+    public long Id { get; set; }
+}
+
+/// <summary>Import a Netscape cookies.txt file (v1.3.0); returns host→cookie-header lines.</summary>
+public sealed class ImportCookiesRequest
+{
+    public string Content { get; set; } = string.Empty;
+}
+
+/// <summary>Request a post-completion action for one task (v1.3.0: extract / convert).</summary>
+public sealed class TaskPostProcessRequest
+{
+    public string TaskKey { get; set; } = string.Empty;
+    /// <summary>extract | mp3 | remux</summary>
+    public string Action { get; set; } = string.Empty;
+    /// <summary>Optional destination for extract.</summary>
+    public string? DestinationDir { get; set; }
+}
+
 public sealed class ImportIdmRequest
 {
     public string Content { get; set; } = string.Empty;
@@ -236,7 +300,7 @@ public sealed class SaveScheduleRequest
 
 public sealed class EngineStatusResponse
 {
-    public string EngineVersion { get; set; } = "1.2.0";
+    public string EngineVersion { get; set; } = "1.3.0";
     public int ActiveTasks { get; set; }
     public int QueuedTasks { get; set; }
     public long GlobalSpeed { get; set; }

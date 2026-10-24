@@ -404,3 +404,46 @@ class DownloadFilter {
   static const paused = DownloadFilter('paused');
   static const media = DownloadFilter('media');
 }
+
+/// RSS/Atom feed subscription (v1.3.0).
+class FeedRuleUi {
+  final int id;
+  final String name;
+  final String url;
+  final String filters;
+  final String destinationDir;
+  final String category;
+  final int intervalMinutes;
+  final bool enabled;
+  final int lastCheckMs;
+  final bool autoStart;
+  final int maxItems;
+
+  const FeedRuleUi({
+    required this.id,
+    this.name = '',
+    this.url = '',
+    this.filters = '',
+    this.destinationDir = '',
+    this.category = 'other',
+    this.intervalMinutes = 30,
+    this.enabled = true,
+    this.lastCheckMs = 0,
+    this.autoStart = true,
+    this.maxItems = 0,
+  });
+
+  factory FeedRuleUi.fromJson(Map<String, dynamic> j) => FeedRuleUi(
+        id: (j['id'] as num).toInt(),
+        name: j['name'] as String? ?? '',
+        url: j['url'] as String? ?? '',
+        filters: j['filters'] as String? ?? '',
+        destinationDir: j['destination_dir'] as String? ?? '',
+        category: j['category'] as String? ?? 'other',
+        intervalMinutes: (j['interval_minutes'] as num?)?.toInt() ?? 30,
+        enabled: j['enabled'] as bool? ?? true,
+        lastCheckMs: (j['last_check_ms'] as num?)?.toInt() ?? 0,
+        autoStart: j['auto_start'] as bool? ?? true,
+        maxItems: (j['max_items'] as num?)?.toInt() ?? 0,
+      );
+}

@@ -163,6 +163,10 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
     List<String> mirrors = const [],
     int? startAtMs,
     String? postAction,
+    String? cookies,
+    String? extraHeaders,
+    String? expectedHash,
+    bool sequential = false,
   }) async {
     final engine = ref.read(engineProvider);
     if (engine == null) return null;
@@ -174,6 +178,10 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
       if (mirrors.isNotEmpty) 'mirrors': mirrors,
       if (startAtMs != null) 'start_at_ms': startAtMs,
       if (postAction != null && postAction.isNotEmpty) 'post_action': postAction,
+      if (cookies != null && cookies.isNotEmpty) 'cookies': cookies,
+      if (extraHeaders != null && extraHeaders.isNotEmpty) 'extra_headers': extraHeaders,
+      if (expectedHash != null && expectedHash.isNotEmpty) 'expected_hash': expectedHash,
+      if (sequential) 'sequential': true,
       'auto_start': autoStart,
     });
     await _load();
@@ -470,3 +478,13 @@ class SortModeNotifier extends Notifier<SortMode> {
 
 final sortModeProvider = NotifierProvider<SortModeNotifier, SortMode>(SortModeNotifier.new);
 
+
+/// v1.3.0: RSS/Atom feed subscriptions.
+final feedRulesProvider = FutureProvider.autoDispose<List<FeedRuleUi>>((ref) async {
+  final engine = ref.watch(engineProvider);
+  if (engine == null) return [];
+  final resp = await engine.call('list_feed_rules');
+  return (resp['rules'] as List)
+      .map((e) => FeedRuleUi.fromJson((e as Map).cast<String, dynamic>()))
+      .toList();
+});

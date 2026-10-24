@@ -462,8 +462,12 @@ Future<void> showAddDownloadDialog(BuildContext context,
   final fileCtrl = TextEditingController();
   final mirrorsCtrl = TextEditingController();
   final startAtCtrl = TextEditingController();
+  final cookiesCtrl = TextEditingController();
+  final headersCtrl = TextEditingController();
+  final hashCtrl = TextEditingController();
   var connections = 4;
   var downloadLater = false;
+  var sequential = false;
   List<String>? previewUrls;
 
   await showDialog(
@@ -566,7 +570,40 @@ Future<void> showAddDownloadDialog(BuildContext context,
                   controller: mirrorsCtrl,
                   maxLines: 3,
                   minLines: 1,
-                  decoration: InputDecoration(labelText: s.mirrors, helperText: s.mirrorsHint),
+                  decoration: InputDecoration(labelText: s.mirrors, helperText: s.mirrorsOnePerLine),
+                ),
+                const SizedBox(height: 8),
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: 8),
+                  title: Text(s.advanced, style: Theme.of(context).textTheme.labelLarge),
+                  children: [
+                    TextField(
+                      controller: cookiesCtrl,
+                      decoration: InputDecoration(labelText: s.cookies, helperText: s.cookiesHint),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: headersCtrl,
+                      decoration: InputDecoration(
+                          labelText: s.extraHeaders, helperText: s.extraHeadersHint),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: hashCtrl,
+                      decoration: InputDecoration(
+                          labelText: s.expectedHash, helperText: s.expectedHashHint),
+                    ),
+                    const SizedBox(height: 4),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: Text(s.sequentialDownload),
+                      subtitle: Text(s.sequentialHint, style: Theme.of(context).textTheme.bodySmall),
+                      value: sequential,
+                      onChanged: (v) => setState(() => sequential = v),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -596,7 +633,7 @@ Future<void> showAddDownloadDialog(BuildContext context,
         urls = urls.first.split(RegExp(r'\s+')).where((u) => u.isNotEmpty).toList();
       }
       final valid = urls
-          .where((u) => u.startsWith('http://') || u.startsWith('https://') || u.startsWith('ftp://') || u.startsWith('ftps://'))
+          .where((u) => u.startsWith('http://') || u.startsWith('https://') || u.startsWith('ftp://') || u.startsWith('ftps://') || u.startsWith('sftp://') || u.startsWith('dav://') || u.startsWith('davs://'))
           .toList();
       if (valid.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.of(context).invalidUrl)));
@@ -621,6 +658,10 @@ Future<void> showAddDownloadDialog(BuildContext context,
           maxConnections: connections,
           mirrors: mirrors,
           startAtMs: startAtMs,
+          cookies: cookiesCtrl.text.trim(),
+          extraHeaders: headersCtrl.text.trim(),
+          expectedHash: hashCtrl.text.trim(),
+          sequential: sequential,
         );
       } else {
         await notifier.addBatch(valid,
@@ -636,6 +677,9 @@ Future<void> showAddDownloadDialog(BuildContext context,
     fileCtrl.dispose();
     mirrorsCtrl.dispose();
     startAtCtrl.dispose();
+    cookiesCtrl.dispose();
+    headersCtrl.dispose();
+    hashCtrl.dispose();
   });
 }
 

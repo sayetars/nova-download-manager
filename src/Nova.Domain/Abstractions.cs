@@ -28,6 +28,10 @@ public sealed class HttpProbeResult
     public string? SuggestedFileName { get; init; }
     public int StatusCode { get; init; }
     public Dictionary<string, string> ExtraHeaders { get; init; } = new();
+    /// <summary>Raw Link headers (Metalink/HTTP RFC 6249 mirrors), v1.3.0.</summary>
+    public List<string> LinkHeaders { get; init; } = new();
+    /// <summary>Raw Digest header (RFC 3230 instance digests), v1.3.0.</summary>
+    public string? DigestHeader { get; init; }
 
     [JsonIgnore] public bool HasKnownSize => ContentLength >= 0;
 }
@@ -84,4 +88,17 @@ public interface ISyncRuleRepository
     IReadOnlyDictionary<string, (string? ETag, string? LastModified)> GetValidators(long ruleId);
     void SaveValidator(long ruleId, string url, string? etag, string? lastModified);
     void ForgetRule(long ruleId);
+}
+
+public interface IFeedRuleRepository
+{
+    IReadOnlyList<FeedRule> GetAll();
+    FeedRule? Get(long id);
+    long Insert(FeedRule rule);
+    void Update(FeedRule rule);
+    void Delete(long id);
+    void SetLastCheck(long id, long atMs);
+    /// <summary>Item ids already seen for a feed (dedupe across checks).</summary>
+    IReadOnlySet<string> GetSeen(long feedId);
+    void MarkSeen(long feedId, string itemId, long atMs);
 }

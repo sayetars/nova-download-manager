@@ -26,6 +26,8 @@ public sealed class TestHttpServer : IDisposable
     public HashSet<string> UnknownLengthFor { get; } = new();
     public Dictionary<string, byte[]> Files { get; } = new();
     public List<string> RequestsSeen { get; } = new();
+    /// <summary>v1.3.0 test hook: observed (path, Cookie, X-Nova-Test) request headers.</summary>
+    public List<(string Path, string? Cookie, string? Custom)> HeaderObservations { get; } = new();
 
     public TestHttpServer()
     {
@@ -61,6 +63,7 @@ public sealed class TestHttpServer : IDisposable
         try
         {
             RequestsSeen.Add($"{req.HttpMethod} {req.Url!.AbsolutePath} {req.Headers["Range"]}");
+            HeaderObservations.Add((req.Url.AbsolutePath, req.Headers["Cookie"], req.Headers["X-Nova-Test"]));
 
             if (RedirectNextTo is { } target && req.Url.AbsolutePath.EndsWith("/redirect-me"))
             {

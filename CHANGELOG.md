@@ -2,6 +2,43 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [1.3.0] — 2026-10-24
+
+**Beyond IDM — Market Parity** — closes the gaps that IDM never had but FDM / JDownloader 2 / aria2 / Motrix have (research matrix: `docs/FEATURE-GAP-2026.md`). C# suite grew 108 → 127 tests (+19 in `V13FeatureTests`); Flutter 8/8 + 0 analyze errors; smoke + parity E2E 12/12 + tarball clean-env PASS.
+
+### Added — engine
+- **Metalink v4 (RFC 5854) + v3**: `.meta4`/`.metalink` tasks expand into mirrors + whole-file hashes + piece hashes (priority + maxconnections attributes honored, tested); Metalink/HTTP **RFC 6249** — `Link: rel=duplicate` mirrors + RFC 3230 `Digest` header (SHA-256/SHA-1/MD5, base64→hex) captured at probe time.
+- **Checksum sidecars**: best-effort discovery of `.sha256` / `.md5` / `.sfv` next to the file URL (coreutils + BSD-tag + SFV formats, name-matched, tested); opt-out via `engine.sidecar_verify=false`.
+- **Algo-qualified integrity framework**: `sha256:` / `sha1:` / `md5:` / `crc32:` expected hashes (inline CRC-32, IEEE check-vector tested) with `Validation` surfaced on the task.
+- **Piece-hash verification + repair** (aria2 `--check-integrity` parity): Metalink pieces verified after download, damaged ranges re-fetched and rewritten in place (2 passes), honest `piece_verify_failed` failure (tested: correct pieces pass, corrupted expectation fails).
+- **Multi-source parallel download** (aria2/FDM parity): mirrors are no longer failover-only — workers round-robin across the source pool simultaneously with per-source strike-based health marking; worker-level fallback absorbs source failures; engine-level mirror rotation kept as the last resort (tested).
+- **Cookies + custom HTTP headers per task**: `cookies` header + `extra_headers` JSON applied on probe, all segment requests, vault-retry, repair fetches and every source (tested end-to-end via header observation). Redirect handler still strips Authorization cross-origin.
+- **Netscape cookies.txt import**: `import_cookies` IPC parses 7-field + `#HttpOnly_` lines into per-host cookie headers (tested).
+- **RSS/Atom feed subscriptions**: `feed_rule`/`feed_seen` tables (migration v7), `FeedService` 30 s due-check timer, RSS 2.0 + Atom (namespace-safe), enclosure → download with `%title%.%ext%` naming, keyword filters, per-rule interval, seen-state dedupe across restarts (tested E2E: adds once, second run skips).
+- **SFTP protocol** (SSH.NET 2026.0.0): segmented parallel-connection downloads with per-segment seeks, single-connection resume, directory listing (scheme admitted: `sftp://`).
+- **WebDAV**: `dav://`→`http`, `davs://`→`https` rewrite (ranged-GET flow unchanged) + `dav_list` PROPFIND Depth-1 browser (zip-slip-safe parser, tested).
+- **Archive auto-extract**: ZIP in-process (zip-slip guarded, tested); 7z/RAR via 7-Zip/bsdtar/unrar discovery when installed; `extract.auto` + `extract.delete_archive` settings.
+- **ffmpeg conversion presets**: per-task `mp3` (audio extract) and `remux` (stream-copy to MP4); `ffmpeg.path` setting; honest failure when ffmpeg is missing; on-demand via `task_postprocess` IPC.
+- **Filename token templates** (aria2 parameterized-URI parity): `%date% %time% %index% %domain% %category% %title% %ext%` — case-insensitive (tested).
+- **Sequential (in-order) segment allocation**: aria2 `--stream-piece-selector=inorder` parity for partial media preview (tested byte-exact).
+
+### Added — remote control
+- **JSON-RPC 2.0 over HTTP + WebSocket** (aria2-RPC / FDM-remote parity): `127.0.0.1:16801/rpc/` (port walk on collision, `rpc.enabled` / `rpc.port` / `rpc.token` settings), 24 mapped methods (`engine.status`, `task.add/list/pause/resume/…`, `feed.*`, `settings.*`), batch arrays, camelCase params normalized, Bearer-token auth (401 without), GET → service banner, WebSocket live `engine_status` stream after token handshake. Verified live: status + task.add round-trip.
+
+### Added — UI (Flutter, EN + FA)
+- **Feeds page** (new sidebar section): list / add / edit / run-now / delete with result toasts.
+- **Settings**: Remote control section (enable + token display), Integrity section (sidecar verification), Post-processing section (auto-extract + delete-archive + ffmpeg path).
+- **Add dialog → Advanced**: per-task cookies, extra headers, expected hash, sequential download; URL filter now admits `sftp://`, `dav://`, `davs://`.
+
+### Changed — extensions (both browsers, 1.3.0)
+- **Opt-in cookie pass-through**: new "Send site cookies with downloads" option (privacy-first, OFF by default, `cookies` permission added); when enabled, login-gated downloads carry the site's cookies to the engine.
+
+### Changed — platform
+- SQLite migration v7 (6 task columns + `feed_rule` + `feed_seen`).
+- `TaskSnapshot` wire additions: `mirrors`, `expected_hash`, `has_cookies`, `sequential`, `convert_preset`, `source_count`.
+- SSH.NET 2026.0.0 (2024.1.0 flagged vulnerable by NuGet audit).
+- Engine + IPC version strings → 1.3.0; UA `NovaDownloadManager/1.3`.
+
 ## [1.2.0] — 2026-10-24
 
 **IDM Parity Polish (P2 complete)** — every remaining P2 gap from `docs/IDM-PARITY.md` is implemented. C# suite grew 81 → 108 tests; all Linux verification green (smoke, parity E2E 12/12, mini-window smoke + VLM QA, UI VLM QA, tarball clean-env byte-exact).

@@ -26,6 +26,8 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
     private readonly Action _requestShutdown;
     private readonly ISyncRuleRepository _syncRules;
     private readonly SyncService _syncService;
+    private readonly IFeedRuleRepository? _feedRules;
+    private readonly FeedService? _feedService;
     private readonly IDisposable _subscription;
     private readonly DateTime _startedAt = DateTime.UtcNow;
     private readonly NovaDatabase _db;
@@ -36,7 +38,8 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
     public IpcMessageRouter(DownloadEngine engine, SchedulerService scheduler, ISettingsRepository settings,
         IQueueRepository queues, MediaCandidatesService mediaProbe, NovaDatabase db, string dataDir, string downloadsDir,
         LoginVault vault, GrabberService grabber, HttpClient http, Action requestShutdown,
-        ISyncRuleRepository? syncRules = null, SyncService? syncService = null)
+        ISyncRuleRepository? syncRules = null, SyncService? syncService = null,
+        IFeedRuleRepository? feedRules = null, FeedService? feedService = null)
     {
         _engine = engine;
         _scheduler = scheduler;
@@ -53,6 +56,8 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
         _requestShutdown = requestShutdown;
         _syncRules = syncRules ?? throw new ArgumentNullException(nameof(syncRules));
         _syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
+        _feedRules = feedRules;
+        _feedService = feedService;
 
         // engine events → broadcast to all IPC clients (throttled for progress)
         _subscription = engine.Events.Subscribe(new BusSink(this));
@@ -129,6 +134,117 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                         TaskId = outcome.TaskId,
                         Duplicate = outcome.Duplicate,
                     });
+                }
+
+                // ---- v1.3.0: feeds, cookies import, WebDAV browser, post-process ----
+
+                case "list_feed_rules":
+                {
+                    var rules = _feedRules?.GetAll().Select(r => (object)new
+                    {
+                        id = r.Id, name = r.Name, url = r.Url, filters = r.Filters,
+                        destination_dir = r.DestinationDir, category = r.Category,
+                        interval_minutes = r.IntervalMinutes, enabled = r.Enabled,
+                        last_check_ms = r.LastCheckMs, auto_start = r.AutoStart, max_items = r.MaxItems,
+                    }).ToList() ?? new List<object>();
+                    return Envelope.Ok(id, new { rules });
+                }
+
+                case "save_feed_rule":
+                {
+                    if (_feedRules is null)
+                        return Envelope.Error(id, "unavailable", "protocol", "Feed support is not available.");
+                    var req = env.PayloadAs<SaveFeedRuleRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.Name) || !Uri.TryCreate(req.Url, UriKind.Absolute, out var feedUri)
+                        || feedUri.Scheme is not ("http" or "https"))
+                        return Envelope.Error(id, "bad_request", "protocol", "Feed name and http(s) URL are required.");
+                    var rule = new FeedRule
+                    {
+                        Id = req.Id ?? 0,
+                        Name = req.Name.Trim(),
+                        Url = req.Url.Trim(),
+                        Filters = req.Filters,
+                        DestinationDir = req.DestinationDir,
+                        Category = string.IsNullOrWhiteSpace(req.Category) ? "other" : req.Category,
+                        IntervalMinutes = Math.Clamp(req.IntervalMinutes, 5, 10_080),
+                        Enabled = req.Enabled,
+                        AutoStart = req.AutoStart,
+                        MaxItems = Math.Max(0, req.MaxItems),
+                    };
+                    if (rule.Id == 0) rule.Id = _feedRules.Insert(rule);
+                    else _feedRules.Update(rule);
+                    return Envelope.Ok(id, new { id = rule.Id });
+                }
+
+                case "delete_feed_rule":
+                {
+                    if (_feedRules is null)
+                        return Envelope.Error(id, "unavailable", "protocol", "Feed support is not available.");
+                    var req = env.PayloadAs<DeleteFeedRuleRequest>() ?? new();
+                    if (req.Id <= 0) return Envelope.Error(id, "bad_request", "protocol", "Rule id is required.");
+                    _feedRules.Delete(req.Id);
+                    return Envelope.Ok(id);
+                }
+
+                case "run_feed":
+                {
+                    if (_feedService is null)
+                        return Envelope.Error(id, "unavailable", "protocol", "Feed support is not available.");
+                    var req = env.PayloadAs<RunFeedRequest>() ?? new();
+                    if (req.Id <= 0) return Envelope.Error(id, "bad_request", "protocol", "Rule id is required.");
+                    var result = await _feedService.RunRuleAsync(req.Id);
+                    return Envelope.Ok(id, new
+                    {
+                        rule_id = result.RuleId, checked_count = result.Checked,
+                        added = result.Added, seen = result.Seen,
+                    });
+                }
+
+                case "import_cookies":
+                {
+                    var req = env.PayloadAs<ImportCookiesRequest>() ?? new();
+                    var jar = CookieFile.ParseNetscape(req.Content);
+                    return Envelope.Ok(id, new { hosts = jar.Select(kv => new { host = kv.Key, cookies = kv.Value }) });
+                }
+
+                case "dav_list":
+                {
+                    var req = env.PayloadAs<FtpListRequest>() ?? new();
+                    var creds = string.IsNullOrEmpty(req.AuthUser)
+                        ? null : new TaskCredentials(req.AuthUser, req.AuthPassword ?? "");
+                    var entries = await Nova.Engine.WebDav.ListAsync(_http, req.Url, creds, ct);
+                    return Envelope.Ok(id, new { entries });
+                }
+
+                case "task_postprocess":
+                {
+                    var req = env.PayloadAs<TaskPostProcessRequest>() ?? new();
+                    var t = _engine.Get(req.TaskKey);
+                    if (t is null || t.State != DownloadState.Completed || !File.Exists(t.FinalPath))
+                        return Envelope.Error(id, "not_ready", "protocol", "Task not completed or file missing.");
+                    switch (req.Action)
+                    {
+                        case "extract":
+                        {
+                            var dir = string.IsNullOrWhiteSpace(req.DestinationDir)
+                                ? Path.Combine(t.DestinationDir, Path.GetFileNameWithoutExtension(t.FinalPath) + "_files")
+                                : req.DestinationDir;
+                            var xr = Nova.Engine.ArchiveTools.Extract(t.FinalPath, dir, ct);
+                            return xr.Ok
+                                ? Envelope.Ok(id, new { ok = true, tool = xr.Tool, message = xr.Message, entries = xr.Entries, dir })
+                                : Envelope.Error(id, "extract_failed", "protocol", xr.Message);
+                        }
+                        case "mp3":
+                        case "remux":
+                        {
+                            var cr = Nova.Engine.ArchiveTools.Convert(t.FinalPath, req.Action, _settings.Get("ffmpeg.path"), ct);
+                            return cr.Ok
+                                ? Envelope.Ok(id, new { ok = true, message = cr.Message, output = cr.OutputPath })
+                                : Envelope.Error(id, "convert_failed", "protocol", cr.Message);
+                        }
+                        default:
+                            return Envelope.Error(id, "bad_request", "protocol", "Action must be extract, mp3 or remux.");
+                    }
                 }
 
                 case "add_downloads":
@@ -349,6 +465,11 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                     if (req.PostAction is not null && PostActionRunner.IsValid(req.PostAction)) t.PostAction = req.PostAction;
                     if (req.Mirrors is not null) t.MirrorUrls = string.Join('\n', req.Mirrors);
                     if (req.Priority is { } p) t.Priority = (TaskPriority)p;
+                    if (req.Cookies is not null) t.Cookies = req.Cookies;
+                    if (req.ExtraHeaders is not null) t.ExtraHeaders = req.ExtraHeaders;
+                    if (req.Sequential is { } sq) t.Sequential = sq;
+                    if (req.ExpectedHash is not null) t.ExpectedHash = req.ExpectedHash.Length > 0 ? req.ExpectedHash : null;
+                    if (req.ConvertPreset is not null && Nova.Engine.ArchiveTools.IsValidPreset(req.ConvertPreset)) t.ConvertPreset = req.ConvertPreset;
                     _taskRepo.Update(t);
                     _engine.Events.TaskUpdated(t);
                     return Envelope.Ok(id, TaskSnapshot.From(t));
@@ -715,6 +836,12 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
         Mirrors = r.Mirrors,
         StartAtMs = r.StartAtMs,
         PostAction = r.PostAction,
+        Cookies = r.Cookies,
+        ExtraHeaders = r.ExtraHeaders,
+        Sequential = r.Sequential,
+        ExpectedHash = r.ExpectedHash,
+        PieceHashes = r.PieceHashes,
+        ConvertPreset = r.ConvertPreset,
     };
 
     // ---- custom categories (category_def table) ----------------------------

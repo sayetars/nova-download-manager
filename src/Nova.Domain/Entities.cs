@@ -94,6 +94,26 @@ public sealed class DownloadTask
     /// <summary>Per-task post-completion action (empty | exit | shutdown | hibernate | sleep | logoff).</summary>
     public string PostAction { get; set; } = string.Empty;
 
+    /// <summary>Cookie header for this task ("k=v; k2=v2") — applied to every HTTP request of the task.
+    /// Opt-in: never auto-captured from browsers without the user's explicit consent.</summary>
+    public string Cookies { get; set; } = string.Empty;
+
+    /// <summary>Extra HTTP headers, JSON object {"Name": "value"} — applied after defaults.</summary>
+    public string ExtraHeaders { get; set; } = string.Empty;
+
+    /// <summary>Sequential (in-order) segment allocation — enables partial media preview while downloading.</summary>
+    public bool Sequential { get; set; }
+
+    /// <summary>Algo-qualified whole-file hash ("sha256:…", "sha1:…", "md5:…", "crc32:…").
+    /// When set, takes precedence over ExpectedSha256 (kept for backward compatibility).</summary>
+    public string? ExpectedHash { get; set; }
+
+    /// <summary>Metalink piece hashes JSON: {"algo":"sha1","size":262144,"hashes":["hex",…]} — enables piece-level repair.</summary>
+    public string? PieceHashes { get; set; }
+
+    /// <summary>Post-download conversion preset ("" | mp3 | remux) — requires ffmpeg on PATH.</summary>
+    public string ConvertPreset { get; set; } = string.Empty;
+
     [JsonIgnore] public bool HasSpeedCap => SpeedCapBytes > 0;
 
     [JsonIgnore] public IReadOnlyList<string> Mirrors =>
@@ -182,3 +202,29 @@ public sealed class SyncRule
 
 /// <summary>Result of one synchronization run.</summary>
 public sealed record SyncRunResult(long RuleId, int Checked, int Added, int Unchanged, int Failed);
+
+/// <summary>RSS/Atom feed subscription — new enclosures/links matching the filters become downloads.</summary>
+public sealed class FeedRule
+{
+    public long Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    /// <summary>Comma-separated case-insensitive title/URL substrings; empty = accept all items.</summary>
+    public string Filters { get; set; } = string.Empty;
+    public string DestinationDir { get; set; } = string.Empty;
+    public string Category { get; set; } = "other";
+    public int IntervalMinutes { get; set; } = 30;
+    public bool Enabled { get; set; } = true;
+    /// <summary>Epoch-ms of the last completed check (0 = never).</summary>
+    public long LastCheckMs { get; set; }
+    /// <summary>Auto-start matched downloads (vs. created in Created state for review).</summary>
+    public bool AutoStart { get; set; } = true;
+    /// <summary>Max items added per check (0 = unlimited).</summary>
+    public int MaxItems { get; set; }
+}
+
+/// <summary>One new download discovered in a feed (result of a feed check).</summary>
+public sealed record FeedItem(string ItemId, string Title, string Url, long PublishedMs);
+
+/// <summary>Result of one feed check run.</summary>
+public sealed record FeedRunResult(long RuleId, int Checked, int Added, int Seen, int Failed);

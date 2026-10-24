@@ -202,6 +202,62 @@ class SettingsPage extends ConsumerWidget {
         // ---- IDM parity v1.2.0: per-server connection caps ---------------------
         _PerServerSection(settings: settings, engine: engine),
 
+        // ---- v1.3.0: remote control (JSON-RPC) ---------------------------------
+        _section(context, Icons.settings_remote_rounded, s.remoteControl, [
+          SwitchListTile(
+            value: settings['rpc.enabled'] != 'false',
+            onChanged: (v) => engine?.call('set_settings', {
+              'values': {'rpc.enabled': '$v'}
+            }),
+            title: Text(s.rpcEnabled, style: const TextStyle(fontSize: 13.5)),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+          Text(s.remoteControlHint,
+              style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 10),
+          _settingField(context, engine, s.rpcToken, 'rpc.token',
+              settings['rpc.token'] ?? '', hint: s.rpcTokenHint),
+        ]),
+
+        // ---- v1.3.0: integrity verification + post-processing ------------------
+        _section(context, Icons.verified_outlined, s.integrity, [
+          SwitchListTile(
+            value: settings['engine.sidecar_verify'] != 'false',
+            onChanged: (v) => engine?.call('set_settings', {
+              'values': {'engine.sidecar_verify': '$v'}
+            }),
+            title: Text(s.sidecarVerify, style: const TextStyle(fontSize: 13.5)),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+          Text(s.sidecarHint, style: Theme.of(context).textTheme.bodySmall),
+        ]),
+        _section(context, Icons.archive_outlined, s.postProcessing, [
+          SwitchListTile(
+            value: settings['extract.auto'] == 'true',
+            onChanged: (v) => engine?.call('set_settings', {
+              'values': {'extract.auto': '$v'}
+            }),
+            title: Text(s.autoExtract, style: const TextStyle(fontSize: 13.5)),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+          Text(s.autoExtractHint, style: Theme.of(context).textTheme.bodySmall),
+          SwitchListTile(
+            value: settings['extract.delete_archive'] == 'true',
+            onChanged: (v) => engine?.call('set_settings', {
+              'values': {'extract.delete_archive': '$v'}
+            }),
+            title: Text(s.deleteArchiveAfter, style: const TextStyle(fontSize: 13.5)),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+          const SizedBox(height: 8),
+          _settingField(context, engine, s.ffmpegPath, 'ffmpeg.path',
+              settings['ffmpeg.path'] ?? ''),
+        ]),
+
         // ---- IDM parity v1.2.0: download-complete dialog customization --------
         _section(context, Icons.notifications_outlined, s.completeDialog, [
           Builder(builder: (context) {

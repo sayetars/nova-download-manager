@@ -33,6 +33,8 @@ export interface ExtSettings {
   interceptKey: 'alt' | 'ctrl' | 'shift' | 'none';
   /** IDM parity v1.2.0 — while this key is held, Nova overlay + interception are suppressed. */
   preventKey: 'none' | 'alt' | 'ctrl' | 'shift';
+  /** v1.3.0 — opt-in: send the site's cookies with the download so login-gated files work. Privacy-first: OFF by default. */
+  passCookies: boolean;
 }
 
 export const DEFAULT_SETTINGS: ExtSettings = {
@@ -44,6 +46,7 @@ export const DEFAULT_SETTINGS: ExtSettings = {
   blocklist: [],
   interceptKey: 'alt',
   preventKey: 'none',
+  passCookies: false,
 };
 
 export async function loadSettings(): Promise<ExtSettings> {

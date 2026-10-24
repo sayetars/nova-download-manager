@@ -137,9 +137,10 @@ public sealed class DownloadEngine : IAsyncDisposable
     public Result<AddDownloadOutcome> Add(NewDownload spec)
     {
         if (string.IsNullOrWhiteSpace(spec.Url) || !Uri.TryCreate(spec.Url, UriKind.Absolute, out var uri)
-            || (uri.Scheme != "http" && uri.Scheme != "https" && uri.Scheme != "ftp" && uri.Scheme != "ftps"))
+            || (uri.Scheme != "http" && uri.Scheme != "https" && uri.Scheme != "ftp" && uri.Scheme != "ftps"
+                && uri.Scheme != "sftp" && uri.Scheme != "dav" && uri.Scheme != "davs"))
             return Result<AddDownloadOutcome>.Fail("bad_url", ErrorCategory.Protocol,
-                "The link is not a valid HTTP(S)/FTP(S) URL.");
+                "The link is not a valid HTTP(S)/FTP(S)/SFTP/WebDAV URL.");
 
         // dedupe: same URL already tracked & not terminal-failed
         var dup = _tasks.Values.FirstOrDefault(e =>
@@ -167,6 +168,12 @@ public sealed class DownloadEngine : IAsyncDisposable
             MirrorUrls = string.Join('\n', spec.Mirrors ?? Array.Empty<string>()),
             StartAtMs = spec.StartAtMs,
             PostAction = spec.PostAction ?? "",
+            Cookies = spec.Cookies ?? "",
+            ExtraHeaders = spec.ExtraHeaders ?? "",
+            Sequential = spec.Sequential,
+            ExpectedHash = spec.ExpectedHash,
+            PieceHashes = spec.PieceHashes,
+            ConvertPreset = spec.ConvertPreset ?? "",
             State = DownloadState.Created,
         };
         task.Id = _repo.Insert(task);
@@ -389,7 +396,8 @@ public sealed class DownloadEngine : IAsyncDisposable
             t => _repo.UpdateProgress(t.Id, t.State, t.ReceivedBytes, t.SegmentsDone, t.SegmentsTotal),
             _vault, _antivirus, _tempRoot,
             n => Quota?.OnBytes(n),
-            (t, plan) => _livePlans[t.TaskKey] = plan.Select(s => new SegmentView(s.Index, s.Start, s.End, s.Received)).ToArray());
+            (t, plan) => _livePlans[t.TaskKey] = plan.Select(s => new SegmentView(s.Index, s.Start, s.End, s.Received)).ToArray(),
+            k => _settings.Get(k));
 
         e.Runner = runner;
         _livePlans.TryRemove(e.Task.TaskKey, out _);
@@ -560,6 +568,18 @@ public sealed record NewDownload
     public long StartAtMs { get; init; }
     /// <summary>Per-task post-completion action ("" | exit | shutdown | hibernate | sleep | logoff).</summary>
     public string? PostAction { get; init; }
+    /// <summary>v1.3.0: cookie header ("k=v; k2=v2") applied to every request of this task.</summary>
+    public string? Cookies { get; init; }
+    /// <summary>v1.3.0: extra HTTP headers JSON ({"Name":"value"}).</summary>
+    public string? ExtraHeaders { get; init; }
+    /// <summary>v1.3.0: sequential (in-order) segment allocation for partial media preview.</summary>
+    public bool Sequential { get; init; }
+    /// <summary>v1.3.0: algo-qualified whole-file hash ("sha256:hex", "sha1:hex", "md5:hex", "crc32:hex").</summary>
+    public string? ExpectedHash { get; init; }
+    /// <summary>v1.3.0: Metalink piece hashes JSON (repair-capable integrity).</summary>
+    public string? PieceHashes { get; init; }
+    /// <summary>v1.3.0: post-download conversion preset ("" | mp3 | remux).</summary>
+    public string? ConvertPreset { get; init; }
 }
 
 public sealed record AddDownloadOutcome(string TaskKey, long TaskId, bool Duplicate);

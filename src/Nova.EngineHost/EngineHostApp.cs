@@ -33,6 +33,9 @@ public sealed class EngineHostApp : IAsyncDisposable
     private readonly QuotaTracker _quota;
     private readonly SyncRuleRepository _syncRules;
     private readonly SyncService _syncService;
+    private readonly FeedRuleRepository _feedRules;
+    private readonly FeedService _feedService;
+    private readonly JsonRpcServer? _rpc;
     private readonly System.Timers.Timer _postActionTimer;
     private string _pendingPostAction = "";
     private bool _postActionCancelled;
@@ -75,11 +78,21 @@ public sealed class EngineHostApp : IAsyncDisposable
         _mediaProbe = new MediaCandidatesService(_http);
         _syncRules = new SyncRuleRepository(_db);
         _syncService = new SyncService(_engine, _syncRules, _http);
+        _feedRules = new FeedRuleRepository(_db);
+        _feedService = new FeedService(_engine, _feedRules, _http);
 
-        _router = new IpcMessageRouter(_engine, _scheduler, _settings, new QueueRepository(_db), _mediaProbe, _db, _dataDir, downloads, _vault, _grabber, _http, RequestShutdown, _syncRules, _syncService);
+        _router = new IpcMessageRouter(_engine, _scheduler, _settings, new QueueRepository(_db), _mediaProbe, _db, _dataDir, downloads, _vault, _grabber, _http, RequestShutdown, _syncRules, _syncService, _feedRules, _feedService);
         var token = EnsureAuthToken();
         _ipc = new IpcServer(_router, token);
         _router.Server = _ipc;
+
+        // v1.3.0: JSON-RPC remote control (localhost + token; off via rpc.enabled=false)
+        if (_settings.Get("rpc.enabled") != "false")
+        {
+            var rpcPort = int.TryParse(_settings.Get("rpc.port"), out var rp) && rp is > 1024 and < 65536 ? rp : 16801;
+            var rpcToken = EnsureRpcToken();
+            _rpc = new JsonRpcServer(_router, rpcToken, rpcPort);
+        }
 
         // post-completion actions + sync-queue re-check, once a minute
         _postActionTimer = new System.Timers.Timer(TimeSpan.FromSeconds(20)) { AutoReset = true };
@@ -241,7 +254,19 @@ public sealed class EngineHostApp : IAsyncDisposable
     public void Run()
     {
         _ipc.Start();
+        _rpc?.Start();
         EngineLog.Info($"Nova engine listening on pipe '{Protocol.PipeName}' (data: {_dataDir})");
+    }
+
+    /// <summary>Separate token for the HTTP/WS JSON-RPC endpoint (rpc.token), shown in the UI settings.</summary>
+    private string EnsureRpcToken()
+    {
+        var existing = _settings.Get("rpc.token");
+        if (!string.IsNullOrWhiteSpace(existing) && existing.Length >= 32) return existing;
+        var generated = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(Guid.NewGuid() + Environment.MachineName)));
+        _settings.Set("rpc.token", generated);
+        return generated;
     }
 
     /// <summary>Proxy-aware client factory: used by the router for FTP browsing, grabber and remote ZIP preview.</summary>
@@ -280,6 +305,8 @@ public sealed class EngineHostApp : IAsyncDisposable
         _postActionTimer.Stop();
         _postActionTimer.Dispose();
         _syncService.Dispose();
+        _feedService.Dispose();
+        _rpc?.Dispose();
         await _ipc.DisposeAsync();
         _scheduler.Dispose();
         await _engine.DisposeAsync();

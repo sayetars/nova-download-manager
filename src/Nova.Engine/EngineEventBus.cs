@@ -127,6 +127,19 @@ public sealed record TaskSnapshot
     public long CreatedAtMs { get; init; }
     public long? StartedAtMs { get; init; }
     public long? CompletedAtMs { get; init; }
+    // ---- v1.3.0 additions ----
+    /// <summary>Comma-separated mirror list (wire convenience; empty when none).</summary>
+    public string? Mirrors { get; init; }
+    /// <summary>Algo-qualified expected hash ("sha256:hex") when one is set.</summary>
+    public string? ExpectedHash { get; init; }
+    /// <summary>Task-level cookie header is set (boolean only — value is sensitive).</summary>
+    public bool HasCookies { get; init; }
+    /// <summary>Sequential (in-order) segment allocation.</summary>
+    public bool Sequential { get; init; }
+    /// <summary>Post-download conversion preset.</summary>
+    public string ConvertPreset { get; init; } = "";
+    /// <summary>Number of multi-source URLs (1 = primary only).</summary>
+    public int SourceCount { get; init; }
 
     public static TaskSnapshot From(DownloadTask t) => new()
     {
@@ -155,6 +168,13 @@ public sealed record TaskSnapshot
         CreatedAtMs = t.CreatedAt.ToUnixTimeMilliseconds(),
         StartedAtMs = t.StartedAt?.ToUnixTimeMilliseconds(),
         CompletedAtMs = t.CompletedAt?.ToUnixTimeMilliseconds(),
+        Mirrors = t.MirrorUrls.Length > 0 ? string.Join(",", t.Mirrors) : null,
+        ExpectedHash = t.ExpectedHash is { Length: > 0 } ? t.ExpectedHash
+            : string.IsNullOrEmpty(t.ExpectedSha256) ? null : "sha256:" + t.ExpectedSha256,
+        HasCookies = !string.IsNullOrEmpty(t.Cookies),
+        Sequential = t.Sequential,
+        ConvertPreset = t.ConvertPreset ?? "",
+        SourceCount = 1 + t.Mirrors.Count(u => u.StartsWith("http", StringComparison.OrdinalIgnoreCase)),
     };
 }
 

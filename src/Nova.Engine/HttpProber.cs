@@ -17,11 +17,12 @@ public sealed class HttpProber
     }
 
     /// <exception cref="NovaHttpException">structured, categorized failure.</exception>
-    public async Task<HttpProbeResult> ProbeAsync(string url, string? referer, CancellationToken ct)
+    public async Task<HttpProbeResult> ProbeAsync(string url, string? referer, CancellationToken ct, DownloadTask? task = null)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
         AddDefaultHeaders(req, referer);
+        if (task is not null) TaskRunner.ApplyTaskHeaders(req, task);
 
         using var resp = await SendGuardedAsync(req, ct);
 
@@ -61,12 +62,14 @@ public sealed class HttpProber
             ContentType = resp.Content.Headers.ContentType?.MediaType,
             SuggestedFileName = fileName,
             StatusCode = (int)resp.StatusCode,
+            LinkHeaders = resp.Headers.TryGetValues("Link", out var links) ? links.ToList() : new List<string>(),
+            DigestHeader = resp.Headers.TryGetValues("Digest", out var digests) ? string.Join(", ", digests) : null,
         };
     }
 
     internal static void AddDefaultHeaders(HttpRequestMessage req, string? referer)
     {
-        req.Headers.UserAgent.ParseAdd("NovaDownloadManager/1.0");
+        req.Headers.UserAgent.ParseAdd("NovaDownloadManager/1.3");
         req.Headers.Accept.ParseAdd("*/*");
         if (!string.IsNullOrEmpty(referer) && Uri.TryCreate(referer, UriKind.Absolute, out var refUri))
             req.Headers.Referrer = refUri;
