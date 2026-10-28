@@ -31,7 +31,7 @@ Cloud pruned 2026-10-28 per the user's space directive (CLOUD-POLICY.md): keep o
 | nova-engine-1.6.0-win-x64.zip (101 MiB, sha256 96be7baf…60970e) | v1.6.0 | PRESENT (previous release — keep per policy) |
 | nova-dm-1.6.0-linux-x64.tar.gz (47 MiB, sha256 1b730550…d0ca21) | v1.6.0 | PUBLISHED 2026-10-29 |
 | nova-chromium-1.6.0.zip / nova-firefox-1.6.0.zip (+ .sha256) | v1.6.0 | PUBLISHED 2026-10-29 |
-| nova-chromium-1.5.0.zip / nova-firefox-1.5.0.zip (+ .sha256) | v1.5.0 | PRESENT (previous release assets — keep per policy) |
+| nova-chromium-1.5.0.zip / nova-firefox-1.5.0.zip (+ .sha256) | v1.5.0 | [removed 2026-10-29] superseded by v1.7.0 (current) + v1.6.0 (previous) per keep-2 |
 | nova-dm-1.4.1-linux-x64.tar.gz (48,266,349 B, sha256 fe34c36a7527493b37105583254cdbb2149fe8c97e5bbd79b93608ebb1c1c384) | v1.4.1 | [removed 2026-10-29] was previous-release; superseded by v1.6.0 (current) + v1.5.0 zips (previous) per CLOUD-POLICY keep-2 |
 | nova-chromium-1.4.1.zip / nova-firefox-1.4.1.zip | v1.4.1 | [removed 2026-10-29] same policy |
 | nova-dm-1.5.0-linux-x64.tar.gz | v1.5.0 | NOT IN CLOUD — never was (T-019 correction); v1.6.0 tarball now supersedes it |
