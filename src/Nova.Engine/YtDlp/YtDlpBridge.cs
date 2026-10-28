@@ -152,7 +152,7 @@ public sealed class YtDlpBridge
 
         if (code != 0 || string.IsNullOrWhiteSpace(stdout))
             throw new YtDlpException("ytdlp_analyze_failed", ErrorCategory.Media,
-                MapStderr(stderr, "The page could not be analyzed."));
+                MapStderrForUi(stderr, "The page could not be analyzed."));
 
         YtDlpMediaInfo info;
         try { info = ParseInfo(stdout); }
@@ -182,7 +182,7 @@ public sealed class YtDlpBridge
 
         if (code != 0)
             throw new YtDlpException("ytdlp_resolve_failed", ErrorCategory.Media,
-                MapStderr(stderr, "The selected format could not be resolved to a direct URL."));
+                MapStderrForUi(stderr, "The selected format could not be resolved to a direct URL."));
 
         var urls = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(u => u.StartsWith("http", StringComparison.OrdinalIgnoreCase))
@@ -307,7 +307,7 @@ public sealed class YtDlpBridge
     }
 
     /// <summary>Maps yt-dlp stderr to a short UI-safe reason (no raw dumps).</summary>
-    private static string MapStderr(string stderr, string fallback)
+    public static string MapStderrForUi(string stderr, string fallback)
     {
         var firstReal = stderr.Split('\n')
             .Select(l => l.Trim())

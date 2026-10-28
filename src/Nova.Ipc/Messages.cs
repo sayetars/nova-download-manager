@@ -318,6 +318,13 @@ public sealed class YtDlpDownloadRequest
     /// <summary>Extension from the analyze step (used when the URL has none).</summary>
     public string? Ext { get; set; }
     public bool AutoStart { get; set; } = true;
+    /// <summary>v1.5.1: run yt-dlp itself (native mode) — required for formats needing merge
+    /// or site-specific fragment handling; the task's bytes come from yt-dlp.</summary>
+    public bool Native { get; set; }
+    /// <summary>v1.5.1: audio format id to merge with a video-only FormatId (native mode).</summary>
+    public string? AudioFormatId { get; set; }
+    /// <summary>v1.5.1: total bytes of the chosen format(s) when known at analyze time.</summary>
+    public long? TotalBytes { get; set; }
 }
 
 /// <summary>G17: start (lazily) the preview server and get the URL for one task.</summary>

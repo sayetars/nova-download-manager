@@ -85,7 +85,8 @@ public sealed class EngineHostApp : IAsyncDisposable
             media: new MediaPipeline(), vault: _vault, antivirus: antivirus, tempRoot: tempRoot,
             quota: _quota,
             profiles: _serverProfiles,
-            pgpKeys: _pgpKeys);
+            pgpKeys: _pgpKeys,
+            ytdlp: _ytdlp);
         _engineHttpClient = _http;
 
         _scheduler = new SchedulerService(_engine, _settings, new QueueRepository(_db));

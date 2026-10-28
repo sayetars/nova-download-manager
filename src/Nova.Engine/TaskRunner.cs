@@ -35,6 +35,7 @@ public sealed class TaskRunner
     private readonly Func<string, string?>? _settings;
     private readonly ServerProfileService? _profiles;
     private readonly Security.PgpKeyringService? _pgpKeys;
+    private readonly YtDlp.YtDlpBridge? _ytdlp;
     private long _lastLivePublishMs;
 
     public TaskRunner(HttpClient http, HttpProber prober, IDownloadTaskRepository tasks,
@@ -47,7 +48,8 @@ public sealed class TaskRunner
         Action<DownloadTask, IReadOnlyList<DownloadSegment>>? publishLive = null,
         Func<string, string?>? settings = null,
         ServerProfileService? profiles = null,
-        Security.PgpKeyringService? pgpKeys = null)
+        Security.PgpKeyringService? pgpKeys = null,
+        YtDlp.YtDlpBridge? ytdlp = null)
     {
         _http = http;
         _prober = prober;
@@ -68,6 +70,7 @@ public sealed class TaskRunner
         _settings = settings;
         _profiles = profiles;
         _pgpKeys = pgpKeys;
+        _ytdlp = ytdlp;
     }
 
     public SpeedMeter Speed { get; } = new();
@@ -140,6 +143,13 @@ public sealed class TaskRunner
             if (Torrent.TorrentTask.IsTorrentSource(task.EffectiveUrl ?? task.Url))
             {
                 await RunTorrentAsync(task, ct);
+                return;
+            }
+
+            // ---- v1.5.1: yt-dlp native mode (merge formats / site fragments) --------------
+            if (YtDlp.YtDlpNativeSelection.TryParse(task.MediaSelection) is { } nativeSel)
+            {
+                await RunYtDlpNativeAsync(task, nativeSel, cancelToken, hardStop);
                 return;
             }
 
@@ -444,6 +454,10 @@ public sealed class TaskRunner
         catch (MediaProcessException mpe)
         {
             Fail(task, new NovaError(mpe.Code, mpe.Category, mpe.Message), retryable: mpe.Retryable);
+        }
+        catch (YtDlp.YtDlpException yex)
+        {
+            Fail(task, new NovaError(yex.Code, yex.Category, yex.Message), retryable: false);
         }
         catch (NovaHttpException hex)
         {
@@ -1146,6 +1160,30 @@ public sealed class TaskRunner
             }
             _events.MaybeProgress(task, rate > 0 ? rate : Speed.SpeedBps, 500);
         }, ct, Setting);
+
+        task.FileName = Path.GetFileName(finalPath);
+        task.CompletedAt = DateTimeOffset.UtcNow;
+        SetState(task, DownloadState.Completed, null);
+        _persistTask(task);
+        _events.Completed(task, finalPath);
+    }
+
+    /// <summary>yt-dlp native path (v1.5.1): yt-dlp downloads/merges; progress maps to task bytes.</summary>
+    private async Task RunYtDlpNativeAsync(DownloadTask task, YtDlp.YtDlpNativeSelection sel,
+        CancellationToken userCancel, CancellationToken hardStop)
+    {
+        SetState(task, DownloadState.Downloading, null);
+        _persistTask(task);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(Pause.Token, userCancel, hardStop);
+        var finalPath = await YtDlp.YtDlpRunner.RunAsync(task, sel, _ytdlp,
+            new YtDlp.YtDlpRunner.Hooks
+            {
+                OnProgress = (delta, rate) =>
+                {
+                    if (delta > 0) { Speed.Add(delta); _quotaHook?.Invoke(delta); }
+                    _events.MaybeProgress(task, rate > 0 ? rate : Speed.SpeedBps, 500);
+                },
+            }, linked.Token, userCancel, hardStop);
 
         task.FileName = Path.GetFileName(finalPath);
         task.CompletedAt = DateTimeOffset.UtcNow;

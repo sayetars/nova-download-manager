@@ -27,6 +27,7 @@ public sealed class DownloadEngine : IAsyncDisposable
     private readonly string? _tempRoot;
     private readonly ServerProfileService? _profiles;
     private readonly Security.PgpKeyringService? _pgpKeys;
+    private readonly YtDlp.YtDlpBridge? _ytdlp;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly System.Timers.Timer _retryTimer;
     private readonly List<string> _quotaPausedKeys = new();
@@ -58,7 +59,8 @@ public sealed class DownloadEngine : IAsyncDisposable
         Antivirus? antivirus = null, string? tempRoot = null,
         QuotaTracker? quota = null,
         ServerProfileService? profiles = null,
-        Security.PgpKeyringService? pgpKeys = null)
+        Security.PgpKeyringService? pgpKeys = null,
+        YtDlp.YtDlpBridge? ytdlp = null)
     {
         _repo = repo;
         _segs = segs;
@@ -75,6 +77,7 @@ public sealed class DownloadEngine : IAsyncDisposable
         Quota = quota;
         _profiles = profiles;
         _pgpKeys = pgpKeys;
+        _ytdlp = ytdlp ?? new YtDlp.YtDlpBridge(k => settings.Get(k));
         _prober = new HttpProber(http);
         UpdateGlobalRateCap(ParseLong(settings.Get("engine.global_speed_cap")));
         _events.Subscribe(new EngineSelfSink(this));
@@ -414,7 +417,7 @@ public sealed class DownloadEngine : IAsyncDisposable
             n => Quota?.OnBytes(n),
             (t, plan) => _livePlans[t.TaskKey] = plan.Select(s => new SegmentView(s.Index, s.Start, s.End, s.Received)).ToArray(),
             k => _settings.Get(k),
-            _profiles, _pgpKeys);
+            _profiles, _pgpKeys, _ytdlp);
 
         e.Runner = runner;
         _livePlans.TryRemove(e.Task.TaskKey, out _);
