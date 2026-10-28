@@ -33,3 +33,9 @@ tools/dropbox/.access-token.json
 dotnet-install.sh
 *.deb
 
+
+# T-019 cloud policy: build outputs & scratch never enter git
+publish/
+tool-results/
+.backup-tmp/
+extensions/*/nova-*.zip
