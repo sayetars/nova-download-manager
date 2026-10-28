@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
+using Nova.Domain;
 
 namespace Nova.Engine.Torrent;
 
@@ -392,6 +393,44 @@ public sealed class DhtClient : IDisposable
             if (!_peerStore.TryGetValue(Convert.ToHexString(infoHash), out var list)) return 0;
             list.RemoveAll(p => p.ExpiresAt < DateTime.UtcNow);
             return list.Count;
+        }
+    }
+
+    // ------------------------------ v1.6.0: peer-store persistence ---------------------
+    /// <summary>Snapshot of the live peer store (unexpired entries only) for persistence
+    /// (row type = Nova.Domain.PeerStoreEntry, shared with Nova.Persistence).</summary>
+    public List<PeerStoreEntry> ExportPeerStore()
+    {
+        lock (_lock)
+        {
+            var now = DateTime.UtcNow;
+            var result = new List<PeerStoreEntry>();
+            foreach (var (hash, list) in _peerStore)
+            {
+                list.RemoveAll(p => p.ExpiresAt < now);
+                foreach (var p in list)
+                    result.Add(new PeerStoreEntry(hash, p.Compact.ToArray(), p.ExpiresAt));
+            }
+            return result;
+        }
+    }
+
+    /// <summary>Restores previously persisted peers (expired rows are dropped, per-hash
+    /// cap respected). Called right after construction, before the lifelong loop runs.</summary>
+    public void ImportPeerStore(IEnumerable<PeerStoreEntry> entries)
+    {
+        lock (_lock)
+        {
+            var now = DateTime.UtcNow;
+            foreach (var e in entries)
+            {
+                if (e.ExpiresAt < now || e.Compact is not { Length: 6 }) continue;
+                if (!_peerStore.TryGetValue(e.InfoHashHex, out var list))
+                    _peerStore[e.InfoHashHex] = list = new List<(byte[], DateTime)>();
+                list.Add((e.Compact.ToArray(), e.ExpiresAt));
+                if (list.Count > PeerStoreMaxPerHash)
+                    list.RemoveRange(0, list.Count - PeerStoreMaxPerHash);
+            }
         }
     }
 

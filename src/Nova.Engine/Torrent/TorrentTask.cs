@@ -56,6 +56,9 @@ public static class TorrentTask
             // v1.4.1: per-file selection + BEP-16
             SelectedFiles = ParseSelectedFiles(task.SelectedFiles),
             SuperSeed = task.SuperSeed || settings?.Invoke("bt_superseed") == "1",
+            // v1.6.0: DHT peer-store persistence (registry installed by the host app)
+            LoadDhtPeerStore = DhtPeerStoreRegistry.Load,
+            SaveDhtPeerStore = DhtPeerStoreRegistry.Save,
         };
         if (opt.SeedAfterComplete || listenPort > 0)
         {

@@ -53,7 +53,12 @@ export PKG_CONFIG_PATH="$HOME/tools/gtk3-dev/usr/lib/x86_64-linux-gnu/pkgconfig:
 ```bash
 pip install cmake ninja    # active venv; binaries land in its bin dir
 ```
-clang: only if `flutter build linux` demands it — apt-get download clang-1X + libllvm-1X + dpkg -x into ~/tools/gtk3-dev/usr.
+clang-19: run `bash scripts/linux/setup_llvm19.sh`, then note the extracted tree ships
+`clang-19` **without a `clang` symlink** — create it yourself
+(`ln -sf ~/tools/llvm-19/usr/bin/clang-19 ~/tools/llvm-19/usr/bin/clang` and same for
+`clang++`), and export `PATH="$HOME/tools/llvm-19/usr/bin:$PATH"` +
+`LD_LIBRARY_PATH="$HOME/tools/llvm-19/usr/lib/x86_64-linux-gnu"` before `flutter build linux`.
+The venv must also be active (cmake/ninja).
 
 ## 3. Health checks (verify before building)
 ```bash

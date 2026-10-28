@@ -2,6 +2,36 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [1.6.0] — 2026-10-29
+
+**The completeness round + first real Windows deliverable.** Completes the v1.5.x candidate list (yt-dlp native-merge end-to-end, DHT peer-store persistence, honest handshake flag bytes) and — the headline — produces a genuine **Windows x64 engine bundle cross-compiled from Linux** (`nova-engine-1.6.0-win-x64.zip`, 101 MiB: `NovaEngine.exe` + `NovaBrowserHost.exe` + `nova.exe`, all self-contained) plus a ready-to-run GitHub Actions workflow that builds the full Windows installer (engine + Flutter UI + extensions + Inno Setup) on a hosted runner. C# suite 195 → 208 tests (+13 in `V160Tests`); Flutter 13 tests + 0 analyze errors; Linux tarball rebuilt for v1.6.0.
+
+### Added — Windows delivery (user's standing request)
+- **Cross-compiled Windows binaries**: `dotnet publish -r win-x64 --self-contained` from the Linux host produces real, runnable `NovaEngine.exe` / `NovaBrowserHost.exe` / `nova.exe` (engine is the heart of the product: all protocols, BitTorrent, HLS/DASH, yt-dlp, preview server, remote control — everything except the Flutter GUI, which cannot be cross-compiled by design of the Flutter toolchain).
+- `scripts/windows/package_win_engine.sh` → `nova-engine-1.6.0-win-x64.zip` (SHA256SUMS inside; `download/` local).
+- `installer/windows/register-nativehost.ps1` — user-level (HKCU, no admin) native-messaging registration for Chrome/Chromium/Brave/Edge + Firefox, idempotent, parameterized by extension id.
+- `installer/windows/README-WINDOWS.md` — quick start (engine + extension without the UI), CLI usage, GUI paths.
+- `.github/workflows/windows-build.yml` — one-push CI: windows-latest runner builds engine + runs the engine test suite **on Windows itself**, builds the Flutter UI (`flutter build windows --release`), packages the extensions, compiles the Inno Setup installer, uploads artifacts, and cuts a GitHub Release on `v*` tags. Setup = push the repo to any GitHub account; no secrets required.
+
+### Added — engine
+- **yt-dlp native-merge mode (completed the v1.5.1 skeleton)**: the runner existed but nothing could trigger it — now wired end-to-end. `ytdlp_download` IPC gains `native` (+ `audio_format_id`, `total_bytes`): native tasks carry a `YtDlpNativeSelection` (`source=ytdlp`, `mode=native`, `format_id="137+251"` style), run yt-dlp itself (`--newline --progress`, `--merge-output-format mp4/mkv` for merge specs, cookies/referer pass-through, `.part` files kept for pause/resume, cancelled tasks cleaned), stream `[download]` lines into engine progress (multi-phase aware), resolve the final (merged) file, and map failures to structured `Media` errors. `Encode()` now emits snake_case keys so the selection round-trips exactly.
+- **DHT peer-store persistence (BEP-5 serving state survives restarts)**: SQLite migration v11 (`dht_peer_store`), `DhtClient.ExportPeerStore()/ImportPeerStore()` (expired rows and non-6-byte compacts dropped, per-hash cap kept), wired via `DhtPeerStoreRegistry` (host app installs `DhtPeerStoreDb`) — sessions warm-start from the snapshot on creation, flush every ~6 minutes of the DHT loop and on dispose.
+- **Honest handshake flag bytes (uTP/PEX flag item)**: we now advertise BEP-10 (0x10 in reserved byte 5) *and* BEP-5 DHT (0x01 in the last byte) — both genuinely implemented; FAST/uTP transport bits are deliberately NOT claimed (we don't implement them; no lying to peers). The peer's reserved bytes are parsed into `PeerSupportsDht` / `PeerSupportsExtensionProtocol` / `PeerSupportsFast` telemetry on both the connect and accept paths; `v` string bumped to "Nova DM 1.6.0".
+- Embedded-player decision: **stands as documented** (system-player handoff; no libmpv bundling — KNOWN-LIMITATIONS #13).
+
+### Added — UI (Flutter, EN + FA)
+- Quality panel: merge-only formats are now selectable (previously greyed out) — picking one automatically routes the download through yt-dlp native mode and shows a "Downloads via yt-dlp (video+audio merge)" badge (`ytdlpNativeBadge`, EN + FA strings).
+
+### Fixed
+- `YtDlpRunner.cs` compile errors that had crept in before the sandbox reset: `Collection<string>.AddRange` (replaced with an `AddArgs` extension), missing `using System.Text.Json.Serialization`.
+- `extensions/build.mjs` version was hardcoded in the zip filename — now read from the browser manifest (single source of truth).
+- `scripts/linux/setup_llvm19.sh`: the extracted tree ships `clang-19` without a `clang` symlink — the script now verifies via the versioned binary (workaround documented in RECOVERY).
+
+### Testing
+- +13 `V160Tests`: reserved-bit advertisement/parse, loopback handshake flag exchange both directions, DHT store export/import round-trip (incl. expired/bad rows), SQLite persistence across DB reopen, registry configure/reset, selection TryParse/Encode/Phases, progress-line parsing variants (percent/raw/ETA), fake-binary runner E2E (two-phase merge, progress events, final-path resolution, exit-code mapping).
+- Full suite 207/208 — the one failure (`Validator_Change_Restarts_Download`) is a **timing flake** of this 2-CPU sandbox (throttled loopback + 15 s window): passes/fails/passes on identical code, isolated re-runs green; logic is untouched by this round (HTTP path unmodified). Recorded in KNOWN-LIMITATIONS.
+- Windows engine bundle and Linux tarball both carry SHA256SUMS; the win-x64 engine was cross-compiled and packaged but **not executed** (no Windows host) — runtime verification remains gated on the user's Windows machine or the CI workflow.
+
 ## [Unreleased] — repository hygiene (T-019, 2026-10-28)
 
 ### Changed — infrastructure (no product code)

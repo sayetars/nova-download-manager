@@ -50,6 +50,7 @@ public sealed class NovaDatabase : IAsyncDisposable
         if (SchemaVersion < 8) { RunMigration(8, Sql.Migration8); SchemaVersion = 8; }
         if (SchemaVersion < 9) { RunMigration(9, Sql.Migration9); SchemaVersion = 9; }
         if (SchemaVersion < 10) { RunMigration(10, Sql.Migration10); SchemaVersion = 10; }
+        if (SchemaVersion < 11) { RunMigration(11, Sql.Migration11); SchemaVersion = 11; }
     }
 
     private void RunMigration(int version, string sql)
@@ -339,6 +340,16 @@ internal static class Sql
             created_at TEXT NOT NULL
         );
         CREATE UNIQUE INDEX IF NOT EXISTS ux_pgp_fingerprint ON pgp_keyring(fingerprint);
+        """;
+
+    /// <summary>v1.6.0: DHT peer-store persistence (BEP-5 serving state across engine restarts).</summary>
+    public const string Migration11 = """
+        CREATE TABLE IF NOT EXISTS dht_peer_store (
+            infohash TEXT NOT NULL,
+            compact BLOB NOT NULL,
+            expires_at TEXT NOT NULL,
+            PRIMARY KEY (infohash, compact)
+        );
         """;
 
     public const string Migration7 = """

@@ -15,8 +15,18 @@ public sealed class PeerWireClient : IAsyncDisposable
     public const int BlockSize = 16384;               // 16 KiB standard block
     public const int MaxPendingBlocks = 12;           // request pipeline depth per peer
 
-    /// <summary>Reserved bits we advertise: BEP-10 extension protocol (bit 43 = 0x10 in last byte).</summary>
-    public static ReadOnlySpan<byte> OurReserved => new byte[8] { 0, 0, 0, 0, 0, 0x10, 0, 0 };
+    /// <summary>Reserved bits we advertise — v1.6.0: BEP-10 extension protocol
+    /// (0x10 in byte 5) + BEP-5 DHT (0x01 in the last byte). We only claim bits we
+    /// actually implement (no FAST/uTP claims) — honest advertisement.</summary>
+    public static ReadOnlySpan<byte> OurReserved => new byte[8] { 0, 0, 0, 0, 0, 0x10, 0, 0x01 };
+
+    // ------------------------------ v1.6.0: peer reserved-flag parsing (telemetry)
+    /// <summary>Peer advertised BEP-5 DHT (0x01 in reserved byte 7).</summary>
+    public static bool ParseSupportsDht(ReadOnlySpan<byte> reserved) => (reserved[7] & 0x01) != 0;
+    /// <summary>Peer advertised BEP-10 extension protocol (0x10 in reserved byte 5).</summary>
+    public static bool ParseSupportsExtensionProtocol(ReadOnlySpan<byte> reserved) => (reserved[5] & 0x10) != 0;
+    /// <summary>Peer advertised BEP-6 FAST extensions (0x04 in reserved byte 7) — we parse but do not send.</summary>
+    public static bool ParseSupportsFast(ReadOnlySpan<byte> reserved) => (reserved[7] & 0x04) != 0;
 
     public const byte MsgChoke = 0, MsgUnchoke = 1, MsgInterested = 2, MsgNotInterested = 3,
         MsgHave = 4, MsgBitfield = 5, MsgRequest = 6, MsgPiece = 7, MsgCancel = 8,
@@ -48,6 +58,12 @@ public sealed class PeerWireClient : IAsyncDisposable
     public int PeerMetadataSize { get; private set; } = -1;
     /// <summary>Peer ids from the BEP-10 handshake for logging/telemetry (may be empty).</summary>
     public string? PeerClientName { get; private set; }
+    /// <summary>v1.6.0: flags parsed from the peer's handshake reserved bytes.</summary>
+    public bool PeerSupportsDht { get; private set; }
+    /// <summary>v1.6.0: peer supports the BEP-10 extension protocol.</summary>
+    public bool PeerSupportsExtensionProtocol { get; private set; }
+    /// <summary>v1.6.0: peer advertises BEP-6 FAST extensions (parsed only).</summary>
+    public bool PeerSupportsFast { get; private set; }
     /// <summary>Statistics.</summary>
     public long BytesDown { get; private set; }
     public long BytesUp { get; private set; }
@@ -73,6 +89,13 @@ public sealed class PeerWireClient : IAsyncDisposable
     }
 
     // ------------------------------------------------------------------ handshake
+    /// <summary>v1.6.0: parse the peer's reserved bytes into telemetry flags.</summary>
+    private void ParsePeerFlags(ReadOnlySpan<byte> reserved)
+    {
+        PeerSupportsDht = ParseSupportsDht(reserved);
+        PeerSupportsExtensionProtocol = ParseSupportsExtensionProtocol(reserved);
+        PeerSupportsFast = ParseSupportsFast(reserved);
+    }
     /// <summary>Performs the two-way handshake. Returns false when info-hash mismatch
     /// (peer has a different torrent) — caller should drop the connection.</summary>
     public async Task<bool> HandshakeAsync(CancellationToken ct)
@@ -102,6 +125,7 @@ public sealed class PeerWireClient : IAsyncDisposable
         Array.Copy(reply, 28, theirHash, 0, 20);
         if (!theirHash.AsSpan().SequenceEqual(InfoHash)) return false;
 
+        ParsePeerFlags(reply.AsSpan(20, 8));
         Connected = true;
         // send BEP-10 extension handshake immediately (supports ut_metadata)
         var extHandshake = BuildExtensionHandshake();
@@ -118,7 +142,7 @@ public sealed class PeerWireClient : IAsyncDisposable
         var dict = BencValue.OfDict()
             .Set("m", m)
             .Set("p", BencValue.Of((_tcp.Client.LocalEndPoint as IPEndPoint)?.Port ?? 0))
-            .Set("v", BencValue.Of("Nova DM 1.4.1"))
+            .Set("v", BencValue.Of("Nova DM 1.6.0"))
             .Set("reqq", BencValue.Of(PeerWireClient.MaxPendingBlocks));
         if (MetadataSize >= 0)
             dict.Set("metadata_size", BencValue.Of(MetadataSize));
@@ -150,6 +174,7 @@ public sealed class PeerWireClient : IAsyncDisposable
         Array.Copy(hello, 28, theirHash, 0, 20);
         if (!theirHash.AsSpan().SequenceEqual(infoHash))
             throw new IOException("info hash mismatch");
+        client.ParsePeerFlags(hello.AsSpan(20, 8));
 
         var reply = new byte[68];
         reply[0] = 19;

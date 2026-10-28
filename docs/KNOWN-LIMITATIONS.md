@@ -9,9 +9,9 @@ This repository was **built and tested on Linux** (.NET 8.0.426 + Flutter 3.47.7
 | Area | Status |
 |---|---|
 | Engine, scheduler, media, persistence, IPC | **Built + 43/43 automated tests passing on this machine** (real HTTP, real files, real processes) |
-| Flutter app | `flutter analyze` clean + 8/8 tests passing; **Windows binary NOT compiled here** (needs a Windows host with VS C++ toolchain) |
-| C++ pipe bridge (`nova/pipe`) | Compiles only with the Windows runner — **not compiled here** (no MSVC on Linux) |
-| Windows installer (Inno Setup) | Script complete; **not compiled here** (iscc is Windows-only) |
+| Flutter app | `flutter analyze` clean + 13 tests passing; **Windows UI binary NOT compiled here** (Flutter cannot cross-compile Windows from Linux) — v1.6.0 ships the cross-compiled ENGINE side for Windows (`nova-engine-1.6.0-win-x64.zip`) and `.github/workflows/windows-build.yml` builds the full installer on a hosted Windows runner |
+| C++ pipe bridge (`nova/pipe`) | Compiles only with the Windows runner — **not compiled here** (no MSVC on Linux); the v1.6.0 GH Actions workflow compiles it on every run |
+| Windows installer (Inno Setup) | Script complete; **not compiled here** (iscc is Windows-only); the GH Actions workflow runs iscc on windows-latest |
 | Extension load in Chrome/Brave/Firefox | Built and packaged; **not manually tested in real browsers on this machine** (no GUI/browsers in the sandbox) |
 
 ## Product limitations (by design or pending)
@@ -35,6 +35,13 @@ This repository was **built and tested on Linux** (.NET 8.0.426 + Flutter 3.47.7
 15. **MP4 files with the `moov` atom at the END cannot be previewed meaningfully** — that is inherent to the container (the player needs the index before the media data; "faststart" files and TS/MKV stream fine). The preview still serves the bytes; the player simply may refuse or stall.
 16. **Metalink PGP "require" policy fails the task but keeps the temp file** — resume/retry with a corrected keyring works without redownloading completed pieces.
 17. **Server performance profiles are advisory** — they reorder equal-priority metalink mirrors and inform the Settings table; they never override an explicit higher-priority mirror (RFC 5854 priority is authoritative).
+
+## Environment-sensitive tests (this Linux sandbox)
+
+- `DownloadEngineTests.Validator_Change_Restarts_Download` is a **timing flake on the 2-CPU sandbox**:
+  it throttles a loopback server to 500 KiB/s and needs 128 KiB inside a 15 s window while the box is
+  loaded (parallel test execution). Observed passing/failing/passing on identical code; isolated
+  re-runs are green. Treat a single failure of this test as environmental; re-run before investigating.
 
 ## Testing gaps to close on a Windows machine
 

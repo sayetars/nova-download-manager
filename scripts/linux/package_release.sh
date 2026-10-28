@@ -4,7 +4,7 @@
 # engine-self-contained/, extensions/, docs/, launcher scripts, SHA256SUMS.
 set -euo pipefail
 ROOT=/home/z/my-project
-VER=1.5.0
+VER=1.6.0
 NAME="nova-dm-${VER}-linux-x64"
 STAGE="$ROOT/download/stage-$NAME"
 OUT="$ROOT/download/$NAME.tar.gz"

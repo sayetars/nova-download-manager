@@ -247,3 +247,8 @@ public sealed record FeedItem(string ItemId, string Title, string Url, long Publ
 
 /// <summary>Result of one feed check run.</summary>
 public sealed record FeedRunResult(long RuleId, int Checked, int Added, int Seen, int Failed);
+
+/// <summary>v1.6.0: one persisted DHT peer-store row — who announced for which info-hash,
+/// until when (BEP-5 serving state made restart-survivable). Lives in Domain so both
+/// the engine (DhtClient) and persistence (DhtPeerStoreDb) can share it without cycles.</summary>
+public sealed record PeerStoreEntry(string InfoHashHex, byte[] Compact, DateTime ExpiresAt);

@@ -33,6 +33,10 @@ public sealed class TorrentSessionOptions
     /// <summary>Overall deadline for magnet metadata acquisition.</summary>
     public TimeSpan MetadataTimeout { get; set; } = TimeSpan.FromSeconds(45);
     public string PeerId { get; set; } = GeneratePeerId();
+    /// <summary>v1.6.0: DHT peer-store persistence hooks — load on session start,
+    /// save every few DHT passes + on dispose (see DhtPeerStoreRegistry / DhtPeerStoreDb).</summary>
+    public Func<IReadOnlyList<PeerStoreEntry>>? LoadDhtPeerStore { get; set; }
+    public Action<IReadOnlyList<PeerStoreEntry>>? SaveDhtPeerStore { get; set; }
 
     public static string GeneratePeerId()
     {
@@ -1189,10 +1193,18 @@ public sealed class TorrentSession : IAsyncDisposable
         try
         {
             _dht = new DhtClient();
+            // v1.6.0: warm-start the peer store from the persisted snapshot so previously
+            // discovered peers (announce→values serving) survive engine restarts
+            if (_opt.LoadDhtPeerStore is { } load)
+            {
+                try { _dht.ImportPeerStore(load()); }
+                catch (Exception ex) { EngineLog.Warn($"dht peer-store load failed: {ex.Message}"); }
+            }
             await _dht.BootstrapAsync(Array.Empty<IPEndPoint>(), ct);
             // v1.4.1: DHT is now a LIFELONG discovery + announce loop (was: one-shot).
             // Each pass: find peers for our info-hash, queue them, then announce_peer
             // so the swarm can find US. Interval 90s ≈ BEP-5 hygiene.
+            var pass = 0;
             while (!ct.IsCancellationRequested)
             {
                 try
@@ -1205,11 +1217,21 @@ public sealed class TorrentSession : IAsyncDisposable
                         await _dht.AnnounceAsync(_infoHash, _announcePort, ct);
                 }
                 catch (Exception) when (!ct.IsCancellationRequested) { /* transient */ }
+                if (++pass % 4 == 0) PersistDhtPeerStore();   // ≈ every 6 minutes
                 try { await Task.Delay(90_000, ct); }
                 catch (OperationCanceledException) { break; }
             }
         }
         catch (Exception) when (ct.IsCancellationRequested is false) { /* DHT unavailable */ }
+    }
+
+    /// <summary>v1.6.0: flush the DHT peer store through the configured hook (no-op default).</summary>
+    private void PersistDhtPeerStore()
+    {
+        var save = _opt.SaveDhtPeerStore;
+        if (save is null || _dht is null) return;
+        try { save(_dht.ExportPeerStore()); }
+        catch (Exception ex) { EngineLog.Warn($"dht peer-store save failed: {ex.Message}"); }
     }
 
     // ================================================================= bitfield sidecar
@@ -1306,6 +1328,7 @@ public sealed class TorrentSession : IAsyncDisposable
         _cts?.Dispose();
         _cts = null;
         try { _listener?.Stop(); } catch { /* already stopped */ }
+        PersistDhtPeerStore();          // v1.6.0: flush peer store before the node dies
         _dht?.Dispose();
         try { _readView?.Dispose(); } catch { /* closed */ }
         await (_data?.DisposeAsync() ?? ValueTask.CompletedTask);

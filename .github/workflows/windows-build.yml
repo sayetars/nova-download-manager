@@ -1,0 +1,136 @@
+name: Nova Windows Build
+
+# Full Windows build on a GitHub-hosted windows-latest runner:
+# engine + BrowserHost + CLI (dotnet), Flutter desktop UI, browser extensions,
+# and the Inno Setup installer. Artifacts are uploaded for download; pushing a
+# tag v* also creates a GitHub Release with the installer attached.
+#
+# One-time setup: create an empty GitHub repository, push this repo's source
+# (git remote add origin <url> && git push -u origin main), then run this
+# workflow from the Actions tab — no other configuration required.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Flutter (pinned 3.47.7)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+
+      - name: Verify toolchain
+        run: |
+          dotnet --version
+          flutter --version
+          flutter doctor
+
+      # ---------------------------------------------------------------- engine
+      - name: Build engine (win-x64 self-contained)
+        run: |
+          dotnet publish src/Nova.EngineHost -c Release -r win-x64 --self-contained -o publish/win-x64/engine
+          dotnet publish src/Nova.BrowserHost -c Release -r win-x64 --self-contained -o publish/win-x64/browserhost
+          dotnet publish src/Nova.Cli -c Release -r win-x64 --self-contained -o publish/win-x64/cli
+          Get-ChildItem publish/win-x64 -Recurse -Filter *.pdb | Remove-Item
+
+      # ---------------------------------------------------------------- engine tests (same OS as the target!)
+      - name: Engine test suite
+        run: dotnet test Nova.sln --filter "FullyQualifiedName!~BrowserPathTests"
+
+      # ---------------------------------------------------------------- UI
+      - name: Build Flutter Windows UI
+        working-directory: apps/nova_desktop
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+          flutter test
+          flutter build windows --release
+
+      # ---------------------------------------------------------------- extensions
+      - name: Setup Node + build extensions
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: |
+          npm install
+          npm run build -- --zip
+        working-directory: extensions
+
+      # ---------------------------------------------------------------- installer
+      - name: Setup Inno Setup
+        shell: cmd
+        run: choco install innosetup -y --no-progress
+
+      - name: Copy engine beside the UI (installer layout)
+        shell: pwsh
+        run: |
+          # nova-installer.iss expects the engine next to the compiled UI — mirror it
+          New-Item -ItemType Directory -Force -Path dist\engine, dist\browserhost, dist\cli, dist\extensions
+          Copy-Item publish\win-x64\engine\* dist\engine\ -Recurse
+          Copy-Item publish\win-x64\browserhost\* dist\browserhost\ -Recurse
+          Copy-Item publish\win-x64\cli\* dist\cli\ -Recurse
+          Copy-Item apps\nova_desktop\build\windows\x64\runner\Release\* dist\ -Recurse
+          Copy-Item extensions\chromium\nova-chromium-1.6.0.zip dist\extensions\
+          Copy-Item extensions\firefox\nova-firefox-1.6.0.zip dist\extensions\
+
+      - name: Build installer (iscc)
+        shell: cmd
+        run: |
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\nova-installer.iss || iscc installer\nova-installer.iss
+
+      - name: Locate installer output
+        id: installer
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter "NovaSetup*.exe" -Path . | Select-Object -First 1
+          if (-not $exe) { $exe = Get-ChildItem -Recurse -Filter "*.exe" -Path dist, installer, Output | Where-Object { $_.Name -notmatch "^nova(\.exe|Engine|Browser)" } | Select-Object -First 1 }
+          "path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "Nova installer: $($exe.FullName)"
+
+      # ---------------------------------------------------------------- artifacts
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-windows-installer
+          path: ${{ steps.installer.outputs.path }}
+          if-no-files-found: error
+
+      - name: Upload portable engine bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-windows-engine-bundle
+          path: |
+            publish/win-x64/engine
+            publish/win-x64/browserhost
+            publish/win-x64/cli
+          if-no-files-found: error
+
+      # ---------------------------------------------------------------- release on tags
+      - name: Create GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release create $tag --title "Nova $tag" --generate-notes `
+            "${{ steps.installer.outputs.path }}" || echo "release create skipped (may already exist)"

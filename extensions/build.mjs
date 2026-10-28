@@ -3,6 +3,9 @@ import { mkdirSync, existsSync, copyFileSync } from 'fs';
 import { execSync } from 'child_process';
 
 const zip = process.argv.includes('--zip');
+// version comes from the browser manifest (single source of truth)
+const { readFileSync } = await import('node:fs');
+const manifestVersion = JSON.parse(readFileSync('chromium/manifest.json', 'utf8')).version;
 const targets = [
   { name: 'chromium', define: { 'process.env.TARGET': '"chromium"' } },
   { name: 'firefox', define: { 'process.env.TARGET': '"firefox"' } },
@@ -34,8 +37,8 @@ for (const t of targets) {
     }
   }
   if (zip) {
-    execSync(`cd ${t.name}/dist && zip -qr ../nova-${t.name}-1.5.0.zip .`, { stdio: 'inherit' });
-    console.log(`→ ${t.name}/nova-${t.name}-1.5.0.zip`);
+    execSync(`cd ${t.name}/dist && zip -qr ../nova-${t.name}-${manifestVersion}.zip .`, { stdio: 'inherit' });
+    console.log(`→ ${t.name}/nova-${t.name}-${manifestVersion}.zip`);
   }
 }
 console.log('done');

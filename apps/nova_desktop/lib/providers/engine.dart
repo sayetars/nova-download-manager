@@ -393,6 +393,7 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
     String? destinationDir,
     String? title,
     String? ext,
+    bool native = false,   // v1.6.0: merge-only formats — yt-dlp downloads/merges itself
     bool autoStart = true,
   }) async {
     final engine = ref.read(engineProvider);
@@ -400,6 +401,7 @@ class TasksNotifier extends Notifier<AsyncValue<List<TaskUi>>> {
     final resp = await engine.call('ytdlp_download', {
       'url': url,
       'format_id': formatId,
+      'native': native,
       if (fileName != null && fileName.isNotEmpty) 'file_name': fileName,
       if (destinationDir != null && destinationDir.isNotEmpty) 'destination_dir': destinationDir,
       if (title != null && title.isNotEmpty) 'title': title,

@@ -492,6 +492,8 @@ Future<void> showAddDownloadDialog(BuildContext context,
   String? ytdlpFormatId;
   bool ytdlpBusy = false;
   String? ytdlpError;
+  // v1.6.0: merge-needed formats now download via yt-dlp native mode (engine merges)
+  bool ytdlpNativeMode = false;
   // v1.4.1: local .torrent file → per-file selection checkboxes
   TorrentPreview? torrentPreview;
   Set<int> deselectedFiles = {};   // indices the user unticked
@@ -625,9 +627,11 @@ Future<void> showAddDownloadDialog(BuildContext context,
                               contentPadding: EdgeInsets.zero,
                               value: f['format_id'] as String? ?? '',
                               groupValue: ytdlpFormatId,
-                              onChanged: f['direct'] == true
-                                  ? (v) => setState(() => ytdlpFormatId = v)
-                                  : null,
+                              // v1.6.0: ALL formats selectable — merge-only ones go native
+                              onChanged: (v) => setState(() {
+                                ytdlpFormatId = v;
+                                ytdlpNativeMode = f['direct'] != true;
+                              }),
                               title: Text(
                                 [
                                   f['resolution'] ?? '',
@@ -649,6 +653,25 @@ Future<void> showAddDownloadDialog(BuildContext context,
                         ],
                       ),
                     ),
+                    // v1.6.0: native-merge hint when a merge-only format is selected
+                    if (ytdlpNativeMode)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Row(
+                          children: [
+                            Icon(Icons.merge_type_rounded,
+                                size: 14,
+                                color: Theme.of(context).colorScheme.primary),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(s.ytdlpNativeBadge,
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: Theme.of(context).colorScheme.primary)),
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ],
                 if (urlCtrl.text.contains('[') && previewUrls == null)
@@ -838,7 +861,7 @@ Future<void> showAddDownloadDialog(BuildContext context,
       await _handleAddOk(ok, context, urlCtrl, fileCtrl, mirrorsCtrl, startAtCtrl,
           cookiesCtrl, headersCtrl, hashCtrl, connections, downloadLater,
           sequential, seedAfter, superSeed, torrentPreview, deselectedFiles,
-          ytdlpInfo, ytdlpFormatId);
+          ytdlpInfo, ytdlpFormatId, ytdlpNativeMode);
     } finally {
       urlCtrl.dispose();
       fileCtrl.dispose();
@@ -878,7 +901,8 @@ Future<void> _handleAddOk(
     TorrentPreview? torrentPreview,
     Set<int> deselectedFiles,
     Map<String, dynamic>? ytdlpInfo,
-    String? ytdlpFormatId) async {
+    String? ytdlpFormatId,
+    bool ytdlpNativeMode) async {   // v1.6.0: merge-only → yt-dlp native download
     if (ok == true && context.mounted) {
       final notifier = ProviderScope.containerOf(context, listen: false)
           .read(prov.tasksProvider.notifier);
@@ -900,6 +924,7 @@ Future<void> _handleAddOk(
             formatId: ytdlpFormatId!,
             fileName: fileCtrl.text.trim().isEmpty ? null : fileCtrl.text.trim(),
             destinationDir: null,
+            native: ytdlpNativeMode,   // v1.6.0: merge-only formats → yt-dlp downloads
             title: ytdlpInfo?['title'] as String?,
             ext: _extOf(ytdlpInfo, ytdlpFormatId),
           );

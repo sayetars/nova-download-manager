@@ -241,6 +241,7 @@ abstract class S {
   String get ytdlpDetected;
   String get ytdlpPick;
   String get ytdlpNeedsMerge;
+  String get ytdlpNativeBadge;
   String get ytdlpLive;
   String get ytdlpDrm;
   String get ytdlpFailed;
@@ -542,6 +543,7 @@ class EnStrings implements S {
   @override String get ytdlpDetected => 'yt-dlp available';
   @override String get ytdlpPick => 'Pick a quality';
   @override String get ytdlpNeedsMerge => 'needs merge';
+  @override String get ytdlpNativeBadge => 'Downloads via yt-dlp (video+audio merge)';
   @override String get ytdlpLive => 'Live streams are not supported.';
   @override String get ytdlpDrm => 'This media is DRM-protected.';
   @override String get ytdlpFailed => 'yt-dlp could not analyze this link.';
@@ -924,6 +926,7 @@ class FaStrings implements S {
   @override String get ytdlpDetected => 'yt-dlp در دسترس است';
   @override String get ytdlpPick => 'انتخاب کیفیت';
   @override String get ytdlpNeedsMerge => 'نیازمند ادغام';
+  @override String get ytdlpNativeBadge => 'دانلود توسط yt-dlp (ادغام ویدیو+صدا)';
   @override String get ytdlpLive => 'پخش زنده پشتیبانی نمی‌شود.';
   @override String get ytdlpDrm => 'این رسانه دارای DRM است.';
   @override String get ytdlpFailed => 'yt-dlp نتوانست این لینک را تحلیل کند.';

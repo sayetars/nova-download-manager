@@ -886,24 +886,70 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                     var req = env.PayloadAs<YtDlpDownloadRequest>() ?? new();
                     if (string.IsNullOrWhiteSpace(req.Url) || string.IsNullOrWhiteSpace(req.FormatId))
                         return Envelope.Error(id, "bad_request", "protocol", "url and format_id required.");
+
+                    // ---- v1.6.0: NATIVE mode — yt-dlp itself downloads (and merges
+                    // video+audio / site fragments). The only path for merge-only formats.
+                    if (req.Native)
+                    {
+                        var formatId = string.IsNullOrWhiteSpace(req.AudioFormatId)
+                            ? req.FormatId
+                            : $"{req.FormatId}+{req.AudioFormatId}";
+                        var name = req.FileName;
+                        if (string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(req.Title))
+                        {
+                            var ext = string.IsNullOrWhiteSpace(req.Ext) ? "mp4" : req.Ext;
+                            name = $"{FilenamePolicy.SanitizeFileName(req.Title)}.{ext}";
+                        }
+                        var sel = new Nova.Engine.YtDlp.YtDlpNativeSelection
+                        {
+                            Page = req.Url,
+                            FormatId = formatId,
+                            Title = req.Title,
+                            Ext = req.Ext,
+                            TotalBytes = req.TotalBytes ?? 0,
+                        };
+                        var nativeOutcome = _engine.Add(new NewDownload
+                        {
+                            Url = req.Url,             // the page — yt-dlp re-resolves it itself
+                            DestinationDir = req.DestinationDir,
+                            FileName = name,
+                            Referer = req.Referer ?? req.Url,
+                            Cookies = req.Cookies,
+                            AutoStart = req.AutoStart,
+                            MediaSelection = sel.Encode(),
+                        });
+                        if (!nativeOutcome.Ok)
+                            return Envelope.Error(id, nativeOutcome.Error!.Code,
+                                nativeOutcome.Error.Category.ToString().ToLowerInvariant(),
+                                nativeOutcome.Error.Message);
+                        return Envelope.Ok(id, new
+                        {
+                            task_key = nativeOutcome.Value!.TaskKey,
+                            task_id = nativeOutcome.Value.TaskId,
+                            duplicate = nativeOutcome.Value.Duplicate,
+                            resolved_url = req.Url,
+                            native = true,
+                        });
+                    }
+
                     var urls = await _ytdlp.ResolveAsync(req.Url, req.FormatId, ct);
                     var direct = urls[0]; // engine downloads the resolved URL (HLS manifests route to the media pipeline)
 
                     // sensible file name: explicit > title.ext > from-URL
-                    var name = req.FileName;
-                    if (string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(req.Title))
+                    var name2 = req.FileName;
+                    if (string.IsNullOrWhiteSpace(name2) && !string.IsNullOrWhiteSpace(req.Title))
                     {
                         var ext = string.IsNullOrWhiteSpace(req.Ext)
                             ? (Path.GetExtension(direct.Split('?')[0]) is { Length: > 1 } e ? e.TrimStart('.') : "mp4")
                             : req.Ext;
-                        name = $"{FilenamePolicy.SanitizeFileName(req.Title)}.{ext}";
+                        name2 = $"{FilenamePolicy.SanitizeFileName(req.Title)}.{ext}";
                     }
 
                     var outcome = _engine.Add(new NewDownload
                     {
                         Url = direct,
                         DestinationDir = req.DestinationDir,
-                        FileName = name,
+                        FileName = name2,
                         Referer = req.Referer ?? req.Url,
                         Cookies = req.Cookies,
                         Sequential = true,   // enables partial preview while it streams in
@@ -918,6 +964,7 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                         task_id = outcome.Value.TaskId,
                         duplicate = outcome.Value.Duplicate,
                         resolved_url = direct,
+                        native = false,
                     });
                 }
 

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Nova.Domain;
 
@@ -14,6 +15,15 @@ namespace Nova.Engine.YtDlp;
 /// or per-site fragment handling. Direct-downloadable formats keep using the normal engine
 /// pipeline (multi-segment, mirrors, hashing) exactly as in v1.5.0.
 /// </summary>
+internal static class ProcessArgExtensions
+{
+    /// <summary>ArgumentList is Collection&lt;string&gt; (no AddRange) — append items one by one.</summary>
+    public static void AddArgs(this ProcessStartInfo psi, params string[] args)
+    {
+        foreach (var a in args) psi.ArgumentList.Add(a);
+    }
+}
+
 public sealed class YtDlpNativeSelection
 {
     public string Source { get; set; } = "ytdlp";
@@ -51,7 +61,11 @@ public sealed class YtDlpNativeSelection
     }
 
     public string Encode() => JsonSerializer.Serialize(this,
-        new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+        new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,   // "format_id", "total_bytes", …
+        });
 
     /// <summary>Number of sequential download phases (one per format in a "a+b" spec).</summary>
     public int Phases => FormatId.Split('+', StringSplitOptions.TrimEntries).Length;
@@ -180,11 +194,11 @@ public static class YtDlpRunner
         psi.ArgumentList.Add("-o");
         psi.ArgumentList.Add(Path.Combine(destDir, baseName + ".%(ext)s"));
         if (sel.FormatId.Contains('+'))
-            psi.ArgumentList.AddRange(new[] { "--merge-output-format", "mp4/mkv" });
+            psi.AddArgs("--merge-output-format", "mp4/mkv");
         if (!string.IsNullOrWhiteSpace(task.Cookies))
-            psi.ArgumentList.AddRange(new[] { "--add-headers", "Cookie: " + task.Cookies });
+            psi.AddArgs("--add-headers", "Cookie: " + task.Cookies);
         if (!string.IsNullOrWhiteSpace(task.Referer))
-            psi.ArgumentList.AddRange(new[] { "--referer", task.Referer });
+            psi.AddArgs("--referer", task.Referer);
 
         using var p = Process.Start(psi)
             ?? throw new YtDlpException("ytdlp_start_failed", ErrorCategory.Media,

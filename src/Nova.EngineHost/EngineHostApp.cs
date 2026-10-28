@@ -8,6 +8,7 @@ using Nova.Ipc;
 using Nova.Media;
 using Nova.Persistence;
 using Nova.Scheduler;
+using Nova.Engine.Torrent;
 
 namespace Nova.EngineHost;
 
@@ -42,6 +43,7 @@ public sealed class EngineHostApp : IAsyncDisposable
     private readonly Nova.Engine.Security.ClientCertificateService _clientCerts;
     private readonly Nova.Engine.Security.PgpKeyringService _pgpKeys;
     private readonly Nova.Engine.YtDlp.YtDlpBridge _ytdlp;
+    private readonly DhtPeerStoreDb? _dhtPeerStore;
     private string _pendingPostAction = "";
     private bool _postActionCancelled;
 
@@ -68,6 +70,12 @@ public sealed class EngineHostApp : IAsyncDisposable
         _clientCerts = new Nova.Engine.Security.ClientCertificateService(new ClientCertRepository(_db));
         _pgpKeys = new Nova.Engine.Security.PgpKeyringService(new PgpKeyringRepository(_db));
         _ytdlp = new Nova.Engine.YtDlp.YtDlpBridge(k => _settings.Get(k));
+
+        // v1.6.0: DHT peer-store persistence — torrent sessions warm-start from the
+        // SQLite snapshot (migration v11) and flush back periodically + on shutdown
+        _dhtPeerStore = new DhtPeerStoreDb(_db);
+        Nova.Engine.Torrent.DhtPeerStoreRegistry.Configure(
+            _dhtPeerStore.LoadAll, _dhtPeerStore.SaveAll);
 
         _http = CreateHttpClient();
         _vault = new LoginVault(_db, _dataDir);
