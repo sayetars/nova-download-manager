@@ -17,7 +17,7 @@ from pathlib import Path
 
 PROJECT = Path("/home/z/my-project")
 sys.path.insert(0, str(PROJECT / "tools" / "dropbox"))
-from backup import STATE_DOCS, collect_files, current_version_from_state  # noqa: E402
+from backup import STATE_DOCS, _keep, collect_files, current_version_from_state  # noqa: E402
 
 
 def render(files: list[Path]) -> str:
@@ -45,7 +45,7 @@ def render(files: list[Path]) -> str:
 
 def main() -> int:
     version = current_version_from_state()
-    files = collect_files()
+    files = [p for p in collect_files() if _keep(p)]  # match backup.py exactly
     head = subprocess.run(
         ["git", "-C", str(PROJECT), "rev-parse", "--short", "HEAD"],
         capture_output=True, text=True, check=True).stdout.strip()
