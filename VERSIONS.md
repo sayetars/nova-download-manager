@@ -3,6 +3,7 @@
 | Version | Date | Status | Notes |
 |---------|------|--------|-------|
 | v1.0.0 | 2026-10-23 | RELEASED (Windows path) | Engine + Flutter UI + extensions + installer + docs. 43/43 C# tests ×2, 8/8 Flutter tests, 0 analyze errors. Commits up to b06e865 + checkpoint c0dfa89. |
+| v1.7.0 | 2026-10-29 | RELEASED (Linux x64 + Windows engine x64) | **Version-integrity round + AES-128 HLS.** `version.json` SSOT + `sync_versions.py` (10 stamped surfaces, 3 cross-checks) + CI audit gate (a drifted tree cannot build); runtime gates (boot schema fail-fast, truthful `engine_status`, extension EN/FA compatibility banner, Settings→Versions); `check_update` JSON manifest + `SemVersion`; legacy `nova/` tree (73 MB) purged (D-012); git tags v1.5.0/v1.6.0 recreated. AES-128 HLS downloaded + decrypted per RFC 8216 (explicit IV, sequence-IV fallback, mixed playlists; DRM still refused). C# 208→**242** tests; Flutter 13 + 0 analyze; linux tarball + win zip + ext zips rebuilt; smoke + clean-env PASS. |
 | v1.6.0 | 2026-10-29 | RELEASED (Linux x64 + Windows engine x64) | Completeness round + first Windows deliverable: yt-dlp native-merge wired end-to-end (RPC native flag + UI selectable merge formats), DHT peer-store persistence (migration v11 + registry), honest handshake flag bits (BEP-5 DHT advertised, peer flags parsed), extensions 1.6.0. **nova-engine-1.6.0-win-x64.zip cross-compiled from Linux** (NovaEngine.exe + NovaBrowserHost.exe + nova.exe self-contained + extensions + register-nativehost.ps1 + README) + `.github/workflows/windows-build.yml` for full Windows CI. 208 C# tests (207/208 — one timing flake documented), 13 Flutter + 0 analyze; linux tarball 47 MB rebuilt. |
 | v1.0.1 | 2026-10-23 | RELEASED (Linux x64) | First Linux build. 43/43 + 8/8 + 0 errors re-verified on Linux; release-bundle smoke suite PASS; self-contained no-runtime boot PASS; tar.gz + sha256 on Dropbox (round-trip verified). |
 | v1.1.0 | 2026-10-24 | RELEASED (Linux x64) | IDM Parity Core + most of Plus: byte quotas, task properties editor, logins vault UI, categories editor, speed-limiter toggle, segment bars + speed graph, drag & drop (Win32+GTK), check-update, FTP byte-delta fix, live segment IPC. 81/81 C# + 8/8 Flutter + 0 analyze errors; parity E2E 12/12; clean-env tarball PASS; VLM QA PASS. |
@@ -24,7 +25,10 @@ Cloud pruned 2026-10-28 per the user's space directive (CLOUD-POLICY.md): keep o
 
 | Artifact | Version | Cloud status (2026-10-29) |
 |----------|---------|---------------------------|
-| **nova-engine-1.6.0-win-x64.zip (101 MiB, sha256 96be7baf…60970e)** | v1.6.0 | PUBLISHED 2026-10-29 — the first real Windows deliverable: cross-compiled self-contained engine + browserhost + CLI + extensions + register-nativehost.ps1 + README-WINDOWS.md |
+| **nova-dm-1.7.0-linux-x64.tar.gz (48,446,039 B, sha256 f6a5a596…13e9a690)** | v1.7.0 | PUBLISHED 2026-10-29 (clean-env PASS) |
+| **nova-engine-1.7.0-win-x64.zip (105,026,000 B, sha256 199be705…9fcd485)** | v1.7.0 | PUBLISHED 2026-10-29 |
+| nova-chromium-1.7.0.zip / nova-firefox-1.7.0.zip (+ .sha256) | v1.7.0 | PUBLISHED 2026-10-29 |
+| nova-engine-1.6.0-win-x64.zip (101 MiB, sha256 96be7baf…60970e) | v1.6.0 | PRESENT (previous release — keep per policy) |
 | nova-dm-1.6.0-linux-x64.tar.gz (47 MiB, sha256 1b730550…d0ca21) | v1.6.0 | PUBLISHED 2026-10-29 |
 | nova-chromium-1.6.0.zip / nova-firefox-1.6.0.zip (+ .sha256) | v1.6.0 | PUBLISHED 2026-10-29 |
 | nova-chromium-1.5.0.zip / nova-firefox-1.5.0.zip (+ .sha256) | v1.5.0 | PRESENT (previous release assets — keep per policy) |

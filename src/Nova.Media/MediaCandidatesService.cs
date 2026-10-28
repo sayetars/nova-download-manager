@@ -108,11 +108,13 @@ public sealed class MediaCandidatesService
                 Kind = "hls",
                 Container = m.InitUrl is null ? "ts" : "mp4",
                 Label = m.IsLive ? "Live stream (not downloadable)" : $"HLS ({m.SegmentUrls.Count} segments)",
-                Downloadable = !m.IsLive && !m.Encrypted,
-                Note = m.Encrypted ? "Encrypted stream (DRM) — not supported"
-                    : m.IsLive ? "Live streams are not supported" : null,
+                // v1.7.0: AES-128 (identity keyformat) is downloaded + decrypted; only real DRM is refused.
+                Downloadable = !m.IsLive && !m.DrmProtected,
+                Note = m.DrmProtected ? "DRM-protected stream — not supported"
+                    : m.IsLive ? "Live streams are not supported"
+                    : m.Encrypted ? "AES-128 encrypted — supported, decrypted automatically" : null,
             });
-            result.DrmDetected = m.Encrypted;
+            result.DrmDetected = m.DrmProtected;
         }
         return result;
     }

@@ -2,6 +2,37 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [1.7.0] — 2026-10-29
+
+**The version-integrity round** (user directive: "نسخه‌بندی یادت نره تا قاطی نشه نسخه‌ها باهم" — never let versions get mixed) **+ AES-128 HLS** (deep-research round 5's top gap). On entry the repo claimed five different versions at once (props 1.6.0, pubspec 1.5.0+6, installer 1.0.0, `engine_status` default "1.5.0", CI literals 1.6.0) and carried a 73 MB abandoned parallel tree. v1.7.0 makes that class of drift structurally impossible: `version.json` is now the single source of truth, ten surfaces are stamped from it, CI refuses drifted trees, the engine refuses mismatched schemas at boot, and users see every component version with live compatibility banners. C# suite 208 → **242 tests** (+34); Flutter 13 tests + 0 analyze errors; Linux tarball + Windows engine zip rebuilt; bundle smoke + clean-env tarball test PASS.
+
+### Added — version integrity (the headline)
+- **`version.json`** — single source of truth at the repo root: product version (lockstep for engine/app/extensions), channel, build, `protocol.*`, `dbSchema`, `minimums.engineForExtension`.
+- **`scripts/sync_versions.py`** — stamps 10 surfaces (Directory.Build.props, generated `Nova.Domain/VersionInfo.cs`, pubspec, generated `lib/core/build_version.dart`, both extension manifests, installer `#define`, extension `MIN_ENGINE_VERSION` constants in TS + options JS, extensions package.json) and enforces 3 cross-checks (dbSchema == latest NovaDatabase migration; protocol == `Protocol.Version`; no versioned artifact literals in CI YAML). `--check` is the CI gate.
+- **Generated `Nova.Domain.VersionInfo`** — every C# version literal now flows from it: `EngineStatusResponse` defaults (was hardcoded "1.5.0"), HTTP User-Agent everywhere (`NovaDownloadManager/1.7.0`; was 1.0–1.3 in three files), BitTorrent BEP-10 `v` string ("Nova DM 1.7.0", was a hardcoded 1.6.0 literal).
+- **`Nova.Domain.SemVersion`** — SemVer 2.0.0 subset parser/comparator (pre-release aware) used for update checks; unit-tested.
+- **CI gates**: `.github/workflows/version-audit.yml` (every push/PR: `--check`; on `v*` tags asserts tag == version.json) and the Windows build's new `audit` job — `windows` now `needs: audit`, so a drifted tree cannot produce binaries. Also fixed a broken branch list (`ain, master]` → `[main, master]`) and replaced literal zip names with wildcards.
+- **Runtime gates**: `EngineHostApp.LoadDb` fail-fasts when the live DB schema ≠ `VersionInfo.DbSchema` ("run sync_versions.py and rebuild"); `engine_status` RPC now reports `engine_version`, `channel`, `db_schema_version`, `min_engine_for_extension` truthfully; the extension options page (EN/FA, RTL-aware) shows extension/engine/protocol/floor versions with a green OK banner, a red "engine outdated — update Nova" banner when the engine is older than the stamped floor, and a gray "engine not running" banner; Settings → Versions (Flutter) lists app + engine + protocol + schema + floor in one card.
+- **Update manifest support** — `check_update` now parses a JSON manifest (`{"version","channel","url","notes"}`), compares with `SemVersion` against `VersionInfo.Version`, and returns `update_available/current_version/latest_version/url/notes`; non-JSON endpoints keep the raw passthrough; the Settings button renders the structured result.
+- **Legacy tree purged** — the unreferenced 73 MB `nova/` parallel implementation (v0.1.0-era) and `scripts/nova-sources.zip` removed from git; its four narrative files survive in `docs/history/legacy-nova-tree/` (DECISIONS D-012). Packaging scripts no longer hardcode versions (both read `version.json`).
+- **`docs/VERSIONING.md`** — the full policy in English + Persian: SSOT, stamped surfaces, release workflow, SemVer discipline, compatibility matrix, channels/tags/artifacts, update manifest format, and the researched Azure Trusted Signing path (~$9.99/mo, individual-friendly) as the recommended next step for signed Windows installers.
+- **Git tag hygiene** — missing `v1.5.0`/`v1.6.0` annotated tags recreated on their exact commits; releases are only cut from `v<version>` tags that must match `version.json`.
+
+### Added — AES-128 HLS (round-5 research headline; RFC 8216 §5.2)
+- **`HlsParser` full `EXT-X-KEY` semantics**: METHOD (NONE/AES-128/SAMPLE-AES), URI resolution, hex IV parsing, KEYFORMAT (identity vs DRM containers), per-segment key mapping (a key applies until the next key tag; `METHOD=NONE` resets), key-tag dedupe, `EXT-X-MEDIA-SEQUENCE` capture, and a precise `DrmProtected` classification (SAMPLE-AES or non-identity keyformat) distinct from plain encryption.
+- **`HlsCrypt`** — AES-128-CBC decryption with PKCS7 stripping (lenient on non-conforming padding, matching ffmpeg's tolerance), IV = tag IV or the segment's media-sequence number as a big-endian 128-bit integer, 512 MiB in-memory segment guard, and a test-only encryptor for fixtures.
+- **`MediaPipeline` AES path** — encrypted VOD playlists download and decrypt on the fly (key fetched with engine UA/referer, cached per URI; mixed plain/encrypted playlists assemble in order; init segments pass through unencrypted per spec). DRM (SAMPLE-AES/Widevine/FairPlay/PlayReady key formats) is still refused with `drm_protected`. The quality panel now labels AES-128 streams "encrypted — supported, decrypted automatically" instead of refusing them.
+- Tests: 4 new E2E suite members (explicit IV; sequence-IV fallback with non-zero `EXT-X-MEDIA-SEQUENCE` base; mixed playlist; SAMPLE-AES still fails) + parser/crypt unit tests; the old "encrypted HLS is rejected" test now asserts SAMPLE-AES behavior.
+
+### Verified
+- `dotnet test Nova.sln`: **242/242** (was 207/208 — the historical timing flake also passed this run).
+- `flutter analyze`: 0 errors · `flutter test`: 13 passed (+1 pre-existing skip).
+- `python3 scripts/sync_versions.py --check`: 10/10 surfaces + 3 cross-checks PASS.
+- Shipped-engine sanity: `nova status` → `engine_version 1.7.0, channel stable, db_schema_version 11, min_engine_for_extension 1.7.0`.
+- `nova-dm-1.7.0-linux-x64.tar.gz` (48,446,039 B, sha256 `f6a5a596…13e9a690`): clean-env (`env -i`, no dotnet) boot + handshake + real download + byte-exact sha256 — PASS.
+- `nova-engine-1.7.0-win-x64.zip` (105,026,000 B, sha256 `199be705…9fcd485`): cross-compiled from Linux; execution on a Windows host / via the CI workflow.
+- `nova-chromium-1.7.0.zip` (sha256 `f334284f…515f4e`), `nova-firefox-1.7.0.zip` (sha256 `afdcf5db…816be1`) + `.sha256`.
+
 ## [1.6.0] — 2026-10-29
 
 **The completeness round + first real Windows deliverable.** Completes the v1.5.x candidate list (yt-dlp native-merge end-to-end, DHT peer-store persistence, honest handshake flag bytes) and — the headline — produces a genuine **Windows x64 engine bundle cross-compiled from Linux** (`nova-engine-1.6.0-win-x64.zip`, 101 MiB: `NovaEngine.exe` + `NovaBrowserHost.exe` + `nova.exe`, all self-contained) plus a ready-to-run GitHub Actions workflow that builds the full Windows installer (engine + Flutter UI + extensions + Inno Setup) on a hosted runner. C# suite 195 → 208 tests (+13 in `V160Tests`); Flutter 13 tests + 0 analyze errors; Linux tarball rebuilt for v1.6.0.

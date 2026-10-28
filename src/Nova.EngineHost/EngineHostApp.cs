@@ -188,6 +188,14 @@ public sealed class EngineHostApp : IAsyncDisposable
     private NovaDatabase LoadDb()
     {
         _dbInstance = new NovaDatabase(Path.Combine(_dataDir, "nova.db"));
+        // Version-integrity fail-fast (v1.7.0): VersionInfo is generated from version.json;
+        // if it disagrees with the live DB schema, the build tooling was not run —
+        // refuse to start rather than silently mixing versions.
+        if (_dbInstance.SchemaVersion != VersionInfo.DbSchema)
+            throw new InvalidOperationException(
+                $"Version mismatch: binary expects DB schema {VersionInfo.DbSchema} " +
+                $"but the database is at schema {_dbInstance.SchemaVersion}. " +
+                "Run scripts/sync_versions.py and rebuild.");
         return _dbInstance;
     }
 

@@ -674,6 +674,29 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
                         using var resp = await http.GetAsync(url, ct);
                         var body = await resp.Content.ReadAsStringAsync(ct);
+                        // v1.7.0 — structured update manifest: {"version":"1.8.0","channel":"stable","url":"…","notes":"…"}
+                        // Compared against VersionInfo (generated from version.json). Falls back to raw passthrough.
+                        System.Text.Json.JsonDocument? doc = null;
+                        try { doc = System.Text.Json.JsonDocument.Parse(body); } catch { /* legacy endpoint */ }
+                        var root = doc?.RootElement;
+                        if (root is { ValueKind: System.Text.Json.JsonValueKind.Object } && root.Value.TryGetProperty("version", out var vEl)
+                            && vEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            var latest = vEl.GetString();
+                            var current = Nova.Domain.VersionInfo.Version;
+                            var newer = Nova.Domain.SemVersion.TryParse(latest) is { } lv
+                                        && Nova.Domain.SemVersion.TryParse(current) is { } cv
+                                        && lv > cv;
+                            string? dl = null, notes = null;
+                            if (root.Value.TryGetProperty("url", out var uEl) && uEl.ValueKind == System.Text.Json.JsonValueKind.String) dl = uEl.GetString();
+                            if (root.Value.TryGetProperty("notes", out var nEl) && nEl.ValueKind == System.Text.Json.JsonValueKind.String) notes = nEl.GetString();
+                            return Envelope.Ok(id, new
+                            {
+                                manifest = true, status_code = (int)resp.StatusCode, update_available = newer,
+                                current_version = current, latest_version = latest,
+                                channel = Nova.Domain.VersionInfo.Channel, url = dl, notes = notes,
+                            });
+                        }
                         return Envelope.Ok(id, new { status_code = (int)resp.StatusCode, body = body.Length > 4000 ? body[..4000] : body });
                     }
                     catch (Exception ex)
@@ -1073,6 +1096,10 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
 
     private object StatusPayload() => new EngineStatusResponse
     {
+        EngineVersion = Nova.Domain.VersionInfo.Version,
+        Channel = Nova.Domain.VersionInfo.Channel,
+        DbSchemaVersion = _db.SchemaVersion,
+        MinEngineForExtension = Nova.Domain.VersionInfo.MinEngineForExtension,
         ActiveTasks = _engine.All().Count(t => t.State is DownloadState.Downloading or DownloadState.Analyzing or DownloadState.Verifying),
         QueuedTasks = _engine.All().Count(t => t.State == DownloadState.Queued),
         GlobalSpeed = _engine.GlobalSpeedBps,

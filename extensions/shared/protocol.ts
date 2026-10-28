@@ -5,6 +5,24 @@
 
 export const NATIVE_HOST = 'com.nova.downloadmanager';
 
+/**
+ * v1.7.0 version-integrity: stamped from version.json by scripts/sync_versions.py —
+ * the minimum engine the extension needs. The options page compares it against
+ * engine_status.engine_version and shows a red banner when the engine is older.
+ */
+export const MIN_ENGINE_VERSION = '1.7.0';
+
+/** SemVer compare (major.minor.patch only); returns -1 | 0 | 1; 0 when unparseable. */
+export function cmpVersions(a: string, b: string): number {
+  const pa = String(a || '').split(/[+\-]/)[0].split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '').split(/[+\-]/)[0].split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+    if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+  }
+  return 0;
+}
+
 export interface MediaCandidate {
   id: string;
   url: string;
@@ -109,6 +127,7 @@ export interface SeenMedia {
 
 export type BgRequest =
   | { type: 'hello' }
+  | { type: 'engine-status' }
   | { type: 'seen-media'; tabId?: number }
   | { type: 'media-probe'; url: string; referer?: string }
   | {

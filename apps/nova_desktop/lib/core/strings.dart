@@ -381,6 +381,15 @@ abstract class S {
   String get quotaWindow;
   String get quotaPaused;
   String get updateNow;
+  // ----- v1.7.0 version integrity
+  String get versionSection;
+  String get appVersionLabel;
+  String get engineVersionLabel;
+  String get protocolLabel;
+  String get schemaLabel;
+  String get minEngineLabel;
+  String get upToDate;
+  String get updateAvailable;
   String get updatedCheck;
   String get editTask;
   String get priorityHigh;
@@ -679,6 +688,14 @@ class EnStrings implements S {
   @override String get quotaWindow => 'Window (minutes)';
   @override String get quotaPaused => 'Byte quota reached — downloads will resume automatically';
   @override String get updateNow => 'Check for updates';
+  @override String get versionSection => 'Versions';
+  @override String get appVersionLabel => 'App version';
+  @override String get engineVersionLabel => 'Engine version';
+  @override String get protocolLabel => 'IPC protocol';
+  @override String get schemaLabel => 'Database schema';
+  @override String get minEngineLabel => 'Minimum engine for extensions';
+  @override String get upToDate => 'You are up to date';
+  @override String get updateAvailable => 'New version available';
   @override String get updatedCheck => 'Update check finished';
   @override String get editTask => 'Edit task';
   @override String get priorityHigh => 'High';
@@ -1061,6 +1078,14 @@ class FaStrings implements S {
   @override String get quotaWindow => 'پنجره زمانی (دقیقه)';
   @override String get quotaPaused => 'سهمیه بایت پر شد — دانلودها خودکار ادامه می‌یابند';
   @override String get updateNow => 'بررسی به‌روزرسانی';
+  @override String get versionSection => 'نسخه‌ها';
+  @override String get appVersionLabel => 'نسخهٔ برنامه';
+  @override String get engineVersionLabel => 'نسخهٔ موتور';
+  @override String get protocolLabel => 'پروتکل IPC';
+  @override String get schemaLabel => 'اسکیمای پایگاه داده';
+  @override String get minEngineLabel => 'حداقل موتور برای افزونه‌ها';
+  @override String get upToDate => 'شما به‌روز هستید';
+  @override String get updateAvailable => 'نسخهٔ جدید موجود است';
   @override String get updatedCheck => 'بررسی به‌روزرسانی انجام شد';
   @override String get editTask => 'ویرایش دانلود';
   @override String get priorityHigh => 'بالا';

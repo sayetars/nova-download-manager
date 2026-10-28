@@ -7,9 +7,10 @@
 # Everything happens inside one tool call (sandbox kills background processes
 # between calls — D-005).
 set -u
-TARBALL="/home/z/my-project/download/nova-dm-1.4.1-linux-x64.tar.gz"
+VER=$(python3 -c 'import json;print(json.load(open("/home/z/my-project/version.json"))["version"])')
+TARBALL="/home/z/my-project/download/nova-dm-${VER}-linux-x64.tar.gz"
 ROOT="/tmp/nova-dm-test"
-PKG="$ROOT/nova-dm-1.4.1-linux-x64"
+PKG="$ROOT/nova-dm-${VER}-linux-x64"
 DATA="$ROOT/data"
 rm -rf "$ROOT"; mkdir -p "$ROOT" "$DATA" "$ROOT/home"
 

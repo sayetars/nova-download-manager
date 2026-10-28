@@ -49,3 +49,25 @@ This repository was **built and tested on Linux** (.NET 8.0.426 + Flutter 3.47.7
 - Load unpacked extensions in the three browsers and walk `docs/TESTING.md`'s manual checklist.
 - `iscc` installer build + install/uninstall verification (incl. native-messaging registration).
 - Native pipe bridge runtime verification (the C++ code follows the standard MethodChannel pattern but has not run).
+
+## 36. Orion browser: native-messaging responses never delivered (upstream bug — 2026-10-29 research)
+The Orion browser (macOS, v1.0.4/1.1.1) currently launches our native host and writes to
+its stdin but never delivers the host's stdout responses back to the extension
+(both `sendNativeMessage` and `connectNative` time out — confirmed by multiple users, still
+Under Review mid-2026). Nova's extension therefore cannot talk to the engine on Orion.
+Chrome, Chromium, Brave, Edge, Firefox are unaffected. No workaround on our side; track
+the upstream issue.
+
+## 37. Windows binaries are unsigned (SmartScreen shows "unknown publisher")
+Until an Azure Trusted Signing subscription is set up (~US$9.99/month; individual identity
+validation with a government ID + Microsoft Authenticator — see docs/VERSIONING.md §8 for
+the researched recipe), Windows will show SmartScreen warnings for `NovaDesktop.exe`,
+`NovaEngine.exe` and the installer. Everything still runs via "More info → Run anyway";
+the SHA256 of every artifact is published alongside it. The CI workflow is the natural
+place to add `signtool` once credentials exist — no code changes required.
+
+## 38. AES-128 HLS segments are decrypted in memory (bounded)
+Each encrypted HLS segment is held in memory before decryption, capped at 512 MiB per
+segment (`HlsCrypt.MaxInMemorySegmentBytes`); typical TS segments are 1–10 MiB, so this
+is not a practical constraint, but a malicious playlist declaring giant segments will be
+rejected with `segment_too_large` rather than exhausting RAM.

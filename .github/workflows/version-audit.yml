@@ -1,0 +1,39 @@
+name: Version Audit
+
+# v1.7.0 version-integrity gate: version.json is the single source of truth.
+# Every push/PR must keep all stamped surfaces (assemblies, generated constants,
+# pubspec, extension manifests, installer, extension minimums) in sync, and the
+# cross-checks (DB schema vs migrations, IPC protocol vs Protocol.cs, no
+# hardcoded artifact names in workflows) must hold. The Windows build REQUIRES
+# this workflow's job (needs: audit) — a drifted tree cannot produce binaries.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: sync_versions --check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Version audit (all surfaces must match version.json)
+        run: python3 scripts/sync_versions.py --check
+
+      - name: Version sanity (release tags match version.json)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VER="$(python3 -c 'import json;print(json.load(open("version.json"))["version"])')"
+          if [ "v$VER" != "$TAG" ]; then
+            echo "Tag $TAG does not match version.json ($VER) — a release tag must point at the version it claims."
+            exit 1
+          fi
+          echo "Tag $TAG matches version.json v$VER"

@@ -56,17 +56,24 @@ public sealed class MediaPipeline : IMediaPipeline
         }
 
         var media = playlist.Media!;
-        if (media.Encrypted)
+        if (media.DrmProtected)
             throw new MediaProcessException("drm_protected", ErrorCategory.Media,
-                "This stream is encrypted (DRM) and cannot be downloaded.");
+                "This stream is DRM-protected (SAMPLE-AES or an external key system) and cannot be downloaded.");
         if (media.IsLive)
             throw new MediaProcessException("live_stream", ErrorCategory.Media,
                 "Live streams are not supported; wait until the stream has ended.");
 
-        var segments = media.SegmentUrls;
-        if (media.InitUrl is not null) segments = new[] { media.InitUrl }.Concat(segments).ToList();
-
-        await DownloadSegmentsAsync(ctx, segments, ct);
+        if (media.Encrypted)
+        {
+            // v1.7.0 — AES-128 (KEYFORMAT=identity) is decrypted on the fly; DRM was already refused above.
+            await DownloadHlsEncryptedAsync(ctx, media, ct);
+        }
+        else
+        {
+            var segments = media.SegmentUrls;
+            if (media.InitUrl is not null) segments = new[] { media.InitUrl }.Concat(segments).ToList();
+            await DownloadSegmentsAsync(ctx, segments, ct);
+        }
         var finalPath = ctx.Finalize();
         EngineLog.Info($"HLS assembled: {finalPath}");
     }
@@ -181,6 +188,123 @@ public sealed class MediaPipeline : IMediaPipeline
         return tmp;
     }
 
+    // ---- HLS AES-128 (RFC 8216 §5.2) -----------------------------------------
+
+    /// <summary>Downloads an AES-128 encrypted HLS playlist: fetches key(s), decrypts each segment
+    /// (IV = tag IV or the segment's media-sequence number), writes plaintext. Mixed key/plain playlists work.</summary>
+    private async Task DownloadHlsEncryptedAsync(DownloadTaskContext ctx, HlsMedia media, CancellationToken ct)
+    {
+        var dir = Path.GetDirectoryName(ctx.TempOutputPath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        await using var fs = new FileStream(ctx.TempOutputPath, FileMode.Create, FileAccess.Write,
+            FileShare.None, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+        if (media.InitUrl is not null) // initialization section is never encrypted (RFC 8216 §4.3.2.5)
+            await DownloadSegmentToFileAsync(ctx, media.InitUrl, fs, ct);
+
+        var total = media.SegmentUrls.Count;
+        var keyCache = new Dictionary<string, byte[]>();
+        for (var i = 0; i < total; i++)
+        {
+            var kIdx = i < media.SegmentKeys.Count ? media.SegmentKeys[i] : -1;
+            var url = media.SegmentUrls[i];
+
+            if (kIdx < 0 || media.Keys[kIdx].Method == "NONE")
+            {
+                await DownloadSegmentToFileAsync(ctx, url, fs, ct);
+            }
+            else
+            {
+                var k = media.Keys[kIdx];
+                if (!k.IsAes128)
+                    throw new MediaProcessException("drm_protected", ErrorCategory.Media,
+                        $"Unsupported key method '{k.Method}' (keyformat '{k.KeyFormat}') — DRM streams cannot be downloaded.");
+                if (!keyCache.TryGetValue(k.Uri, out var key))
+                {
+                    key = await FetchHlsKeyAsync(ctx, k.Uri, ct);
+                    keyCache[k.Uri] = key;
+                }
+                var iv = k.Iv ?? HlsCrypt.IvFromSequence(media.MediaSequence + i);
+                var cipher = await DownloadSegmentBytesAsync(ctx, url, ct);
+                var plain = HlsCrypt.DecryptSegment(cipher, key, iv);
+                await fs.WriteAsync(plain, ct);
+            }
+            ctx.OnSegments(i + 1, total);
+        }
+        await fs.FlushAsync(ct);
+    }
+
+    private async Task<byte[]> FetchHlsKeyAsync(DownloadTaskContext ctx, string url, CancellationToken ct)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.UserAgent.ParseAdd(Nova.Domain.VersionInfo.UserAgent);
+                if (ctx.Task.Referer is { } r && Uri.TryCreate(r, UriKind.Absolute, out var ru))
+                    req.Headers.Referrer = ru;
+                using var resp = await ctx.Http.SendAsync(req, ct);
+                if (!resp.IsSuccessStatusCode)
+                    throw new MediaProcessException("key_http_" + (int)resp.StatusCode, ErrorCategory.Http,
+                        $"Key fetch failed ({(int)resp.StatusCode}).", retryable: (int)resp.StatusCode >= 500);
+                var key = await resp.Content.ReadAsByteArrayAsync(ct);
+                if (key.Length != 16)
+                    throw new MediaProcessException("bad_key", ErrorCategory.Media,
+                        $"AES-128 key must be 16 bytes, got {key.Length}.");
+                return key;
+            }
+            catch (MediaProcessException ex) when (ex.Retryable && attempt < MaxSegmentRetries)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1.5 * (attempt + 1)), ct);
+            }
+        }
+    }
+
+    /// <summary>Fetches a segment into memory (bounded by HlsCrypt.MaxInMemorySegmentBytes) for decryption.</summary>
+    private async Task<byte[]> DownloadSegmentBytesAsync(DownloadTaskContext ctx, string url, CancellationToken ct)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.UserAgent.ParseAdd(Nova.Domain.VersionInfo.UserAgent);
+                if (ctx.Task.Referer is { } r && Uri.TryCreate(r, UriKind.Absolute, out var ru))
+                    req.Headers.Referrer = ru;
+                using var resp = await ctx.Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                if (!resp.IsSuccessStatusCode)
+                    throw new MediaProcessException("segment_http_" + (int)resp.StatusCode,
+                        ErrorCategory.Http, $"Segment download failed ({(int)resp.StatusCode}).", retryable: (int)resp.StatusCode >= 500);
+                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                using var buf = new MemoryStream();
+                var buffer = new byte[64 * 1024];
+                while (true)
+                {
+                    var g = ctx.GlobalLimiter();
+                    if (g is not null) await g.WaitAsync(64 * 1024, ct);
+                    if (ctx.TaskLimiter is not null) await ctx.TaskLimiter.WaitAsync(64 * 1024, ct);
+                    var n = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
+                    if (n <= 0) break;
+                    await buf.WriteAsync(buffer.AsMemory(0, n), ct);
+                    ctx.OnBytes(n);
+                    if (buf.Length > HlsCrypt.MaxInMemorySegmentBytes)
+                        throw new MediaProcessException("segment_too_large", ErrorCategory.Media,
+                            "Encrypted segment exceeds the in-memory limit.");
+                }
+                return buf.ToArray();
+            }
+            catch (MediaProcessException ex) when (ex.Retryable && attempt < MaxSegmentRetries)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1.5 * (attempt + 1)), ct);
+            }
+            catch (IOException) when (attempt < MaxSegmentRetries)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            }
+        }
+    }
+
     // ---- shared -------------------------------------------------------------
 
     private async Task DownloadSegmentsAsync(DownloadTaskContext ctx, List<string> segments, CancellationToken ct)
@@ -206,7 +330,7 @@ public sealed class MediaPipeline : IMediaPipeline
             try
             {
                 using var req = new HttpRequestMessage(HttpMethod.Get, url);
-                req.Headers.UserAgent.ParseAdd("NovaDownloadManager/1.0");
+                req.Headers.UserAgent.ParseAdd(Nova.Domain.VersionInfo.UserAgent);
                 if (ctx.Task.Referer is { } r && Uri.TryCreate(r, UriKind.Absolute, out var ru))
                     req.Headers.Referrer = ru;
                 using var resp = await ctx.Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -242,7 +366,7 @@ public sealed class MediaPipeline : IMediaPipeline
     private static async Task<string> FetchTextAsync(DownloadTaskContext ctx, string url, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        req.Headers.UserAgent.ParseAdd("NovaDownloadManager/1.0");
+        req.Headers.UserAgent.ParseAdd(Nova.Domain.VersionInfo.UserAgent);
         if (ctx.Task.Referer is { } r && Uri.TryCreate(r, UriKind.Absolute, out var ru))
             req.Headers.Referrer = ru;
         using var resp = await ctx.Http.SendAsync(req, ct);

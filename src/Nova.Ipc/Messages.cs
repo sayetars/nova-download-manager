@@ -382,7 +382,10 @@ public sealed class SaveScheduleRequest
 
 public sealed class EngineStatusResponse
 {
-    public string EngineVersion { get; set; } = "1.5.0";
+    public string EngineVersion { get; set; } = Nova.Domain.VersionInfo.Version;
+    public string Channel { get; set; } = Nova.Domain.VersionInfo.Channel;
+    public int DbSchemaVersion { get; set; }
+    public string MinEngineForExtension { get; set; } = Nova.Domain.VersionInfo.MinEngineForExtension;
     public int ActiveTasks { get; set; }
     public int QueuedTasks { get; set; }
     public long GlobalSpeed { get; set; }

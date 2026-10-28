@@ -69,7 +69,7 @@ public sealed class HttpProber
 
     internal static void AddDefaultHeaders(HttpRequestMessage req, string? referer)
     {
-        req.Headers.UserAgent.ParseAdd("NovaDownloadManager/1.3");
+        req.Headers.UserAgent.ParseAdd(Nova.Domain.VersionInfo.UserAgent);
         req.Headers.Accept.ParseAdd("*/*");
         if (!string.IsNullOrEmpty(referer) && Uri.TryCreate(referer, UriKind.Absolute, out var refUri))
             req.Headers.Referrer = refUri;

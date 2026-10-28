@@ -13,13 +13,45 @@ public sealed record HlsVariant
     public string? Resolution { get; init; }
 }
 
+/// <summary>EXT-X-KEY tag (RFC 8216 §4.3.2.4). Applies to subsequent segments until the next key tag.</summary>
+public sealed record HlsKey
+{
+    /// <summary>NONE | AES-128 | SAMPLE-AES (upper-cased).</summary>
+    public string Method { get; init; } = "NONE";
+
+    /// <summary>Absolute key URI (resolved against the playlist).</summary>
+    public string Uri { get; init; } = "";
+
+    /// <summary>Explicit 16-byte IV when the tag carries one; null → IV = media sequence number.</summary>
+    public byte[]? Iv { get; init; }
+
+    /// <summary>KEYFORMAT; anything other than "identity" is a DRM key container we cannot process.</summary>
+    public string KeyFormat { get; init; } = "identity";
+
+    public bool IsAes128 => Method == "AES-128" && KeyFormat == "identity";
+}
+
 /// <summary>Parsed media playlist.</summary>
 public sealed record HlsMedia
 {
     public required List<string> SegmentUrls { get; init; }
-    public string? InitUrl { get; init; }
-    /// <summary>EXT-X-KEY with method != NONE → encrypted; we refuse DRM-protected content.</summary>
+
+    /// <summary>Parallel to <see cref="SegmentUrls"/>: index into <see cref="Keys"/>, or -1 for plaintext.</summary>
+    public IReadOnlyList<int> SegmentKeys { get; init; } = Array.Empty<int>();
+
+    /// <summary>Distinct EXT-X-KEY tags in first-appearance order.</summary>
+    public IReadOnlyList<HlsKey> Keys { get; init; } = Array.Empty<HlsKey>();
+
+    /// <summary>EXT-X-MEDIA-SEQUENCE (sequence number of the first segment; IV fallback base).</summary>
+    public long MediaSequence { get; init; }
+
+    /// <summary>Any applicable key with METHOD != NONE.</summary>
     public bool Encrypted { get; init; }
+
+    /// <summary>True when an applicable key is SAMPLE-AES or KEYFORMAT != identity — real DRM, always refused.</summary>
+    public bool DrmProtected { get; init; }
+
+    public string? InitUrl { get; init; }
     public bool IsLive => !HasEndList;
     public bool HasEndList { get; init; }
     public int TargetDurationSec { get; init; } = 4;
@@ -61,17 +93,46 @@ public static class HlsParser
         else
         {
             var segs = new List<string>();
+            var segKeys = new List<int>();
+            var keys = new List<HlsKey>();
             string? init = null;
-            var encrypted = false;
             var endList = false;
+            var mediaSeq = 0L;
+            var curKey = -1;
+
             for (var i = 0; i < lines.Length; i++)
             {
                 var l = lines[i];
                 if (l.StartsWith("#EXT-X-KEY", StringComparison.Ordinal))
                 {
-                    var method = GetAttr(l, "METHOD") ?? "NONE";
-                    if (!string.Equals(method, "NONE", StringComparison.OrdinalIgnoreCase))
-                        encrypted = true;
+                    var method = (GetAttr(l, "METHOD") ?? "NONE").ToUpperInvariant();
+                    if (string.Equals(method, "NONE", StringComparison.Ordinal))
+                    {
+                        curKey = -1; // explicit un-encryption from here on
+                        continue;
+                    }
+                    var uri = GetAttr(l, "URI") ?? "";
+                    var key = new HlsKey
+                    {
+                        Method = method,
+                        Uri = ResolveUrl(playlistUrl, uri),
+                        Iv = HlsCrypt.ParseIv(GetAttr(l, "IV")),
+                        KeyFormat = GetAttr(l, "KEYFORMAT") ?? "identity",
+                    };
+                    // playlists commonly repeat the same key tag per segment — dedupe by content
+                    var idx = keys.FindIndex(k => k.Method == key.Method && k.Uri == key.Uri
+                                                   && k.KeyFormat == key.KeyFormat && IvEquals(k.Iv, key.Iv));
+                    if (idx < 0)
+                    {
+                        keys.Add(key);
+                        idx = keys.Count - 1;
+                    }
+                    curKey = idx;
+                }
+                else if (l.StartsWith("#EXT-X-MEDIA-SEQUENCE", StringComparison.Ordinal))
+                {
+                    var v = l.Split(':', 2);
+                    if (v.Length == 2) long.TryParse(v[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out mediaSeq);
                 }
                 else if (l.StartsWith("#EXT-X-MAP", StringComparison.Ordinal))
                 {
@@ -85,20 +146,46 @@ public static class HlsParser
                 else if (!l.StartsWith("#"))
                 {
                     segs.Add(ResolveUrl(playlistUrl, l));
+                    segKeys.Add(curKey);
                 }
             }
+
+            var encrypted = false;
+            var drm = false;
+            for (var i = 0; i < segKeys.Count; i++)
+            {
+                if (segKeys[i] < 0) continue;
+                var k = keys[segKeys[i]];
+                if (k.Method == "NONE") continue;
+                encrypted = true;
+                if (k.Method == "SAMPLE-AES" || !string.Equals(k.KeyFormat, "identity", StringComparison.Ordinal))
+                    drm = true;
+            }
+
             return new HlsPlaylist
             {
                 Kind = HlsKind.Media,
                 Media = new HlsMedia
                 {
                     SegmentUrls = segs,
-                    InitUrl = init,
+                    SegmentKeys = segKeys,
+                    Keys = keys,
+                    MediaSequence = mediaSeq,
                     Encrypted = encrypted,
+                    DrmProtected = drm,
+                    InitUrl = init,
                     HasEndList = endList,
                 },
             };
         }
+    }
+
+    private static bool IvEquals(byte[]? a, byte[]? b)
+    {
+        if (a is null && b is null) return true;
+        if (a is null || b is null || a.Length != b.Length) return false;
+        for (var i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+        return true;
     }
 
     public static string ResolveUrl(string baseUrl, string url)

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app.dart';
+import '../core/build_version.dart';
 import '../core/strings.dart';
 import '../core/theme.dart';
 import '../providers/engine.dart' as prov;
@@ -286,11 +287,21 @@ class SettingsPage extends ConsumerWidget {
                 try {
                   final resp = await engine?.call('check_update');
                   if (!context.mounted) return;
-                  final code = resp?['status_code'];
-                  final body = (resp?['body'] as String? ?? '').trim();
-                  final msg = body.length > 300 ? '${body.substring(0, 300)}…' : body;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(code == null ? s.updatedCheck : 'HTTP $code — $msg')));
+                  String msg;
+                  if (resp != null && resp['manifest'] == true) {
+                    // v1.7.0 — structured update manifest + SemVer compare in the engine.
+                    final latest = resp['latest_version'] as String? ?? '?';
+                    final upd = resp['update_available'] == true;
+                    msg = upd ? '${s.updateAvailable}: v$latest' : '${s.upToDate} (v$latest)';
+                  } else {
+                    final code = resp?['status_code'];
+                    final body = (resp?['body'] as String? ?? '').trim();
+                    final m2 = body.length > 300 ? '${body.substring(0, 300)}…' : body;
+                    msg = code == null ? s.updatedCheck : 'HTTP $code — $m2';
+                  }
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+                  }
                 } catch (e) {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -304,6 +315,44 @@ class SettingsPage extends ConsumerWidget {
                   style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ),
           ]),
+        ]),
+
+        // ---- v1.7.0: version integrity (all components in one place, from the engine)
+        _section(context, Icons.verified_outlined, s.versionSection, [
+          FutureBuilder<Map<String, dynamic>?>(
+            future: engine?.call('engine_status'),
+            builder: (context, snap) {
+              final st = snap.data;
+              final rows = <(String, String)>[
+                (s.appVersionLabel, 'v${BuildVersion.version} (${BuildVersion.channel})'),
+                (s.engineVersionLabel, st == null ? '—' : 'v${st['engine_version'] ?? '?'}'),
+                (s.protocolLabel, st == null ? '—' : '${st['protocol_version'] ?? '?'}'),
+                (s.schemaLabel, st == null ? '—' : '${st['db_schema_version'] ?? '?'}'),
+                (s.minEngineLabel, st == null ? '—' : 'v${st['min_engine_for_extension'] ?? '?'}'),
+              ];
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final (label, value) in rows)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Row(children: [
+                        SizedBox(
+                            width: 210,
+                            child: Text(label,
+                                style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: Theme.of(context).colorScheme.onSurfaceVariant))),
+                        Expanded(
+                            child: Text(value,
+                                style: const TextStyle(
+                                    fontSize: 13, fontFeatures: [FontFeature.tabularFigures()]))),
+                      ]),
+                    ),
+                ],
+              );
+            },
+          ),
         ]),
 
         // ---- IDM parity: import / export --------------------------------------

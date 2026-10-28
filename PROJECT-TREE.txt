@@ -1,9 +1,12 @@
 # PROJECT-TREE — Nova Download Manager
-# version v1.5.0 · git 0ed58dd · 2026-10-28T16:01:56
-# exact file-set carried by the Dropbox source checkpoint (266 files, 2,188,915 bytes uncompressed)
+# version v1.7.0 · git 3c219fd · 2026-10-28T21:28:23
+# exact file-set carried by the Dropbox source checkpoint (276 files, 2,291,436 bytes uncompressed)
 # (regenerate: python3 scripts/gen_project_tree.py)
 
 .env
+.github/
+  workflows/
+    windows-build.yml
 .gitignore
 CHANGELOG.md
 CLOUD-POLICY.md
@@ -128,7 +131,7 @@ extensions/
       icon32.png
       icon48.png
     manifest.json
-    nova-chromium-1.5.0.zip
+    nova-chromium-1.5.0.zip.sha256
     src/
       background.ts
       content.ts
@@ -152,7 +155,7 @@ extensions/
       icon32.png
       icon48.png
     manifest.json
-    nova-firefox-1.5.0.zip
+    nova-firefox-1.5.0.zip.sha256
     src/
       background.ts
       content.ts
@@ -172,12 +175,16 @@ installer/
     RUN-LINUX.sh
     register-browser-host.sh
   nova-installer.iss
+  windows/
+    README-WINDOWS.md
+    register-nativehost.ps1
 scripts/
   bt_debug.csx
   bt_e2e_debug.csx
   build-dev.sh
   build-release.ps1
   build-sysroot.sh
+  cloud_cleanup_t019.py
   dbg-json/
     Program.cs
     dbg-json.csproj
@@ -199,8 +206,11 @@ scripts/
     smoke_test.sh
     tarball_cleanenv_test.sh
     ui_smoke.sh
+  nova_dropbox_upload.py
   upload_v120_dropbox.py
   vlm_mini_check.py
+  windows/
+    package_win_engine.sh
 src/
   Nova.BrowserHost/
     Nova.BrowserHost.csproj
@@ -247,6 +257,7 @@ src/
     Torrent/
       Bencode.cs
       DhtClient.cs
+      DhtPeerStoreRegistry.cs
       PeerWireClient.cs
       PexMessage.cs
       PiecePicker.cs
@@ -258,6 +269,7 @@ src/
     WebDav.cs
     YtDlp/
       YtDlpBridge.cs
+      YtDlpRunner.cs
     ZipPreview.cs
   Nova.EngineHost/
     EngineHostApp.cs
@@ -283,6 +295,7 @@ src/
     MediaPipeline.cs
     Nova.Media.csproj
   Nova.Persistence/
+    DhtPeerStoreDb.cs
     DownloadTaskRepository.cs
     LoginVault.cs
     Nova.Persistence.csproj
@@ -317,6 +330,7 @@ tests/
     TorrentV141Tests.cs
     V13FeatureTests.cs
     V150Tests.cs
+    V160Tests.cs
 tools/
   dropbox/
     backup.py

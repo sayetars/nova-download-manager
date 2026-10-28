@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Nova — assemble the Windows x64 ENGINE bundle zip (v1.6.0).
+# Nova — assemble the Windows x64 ENGINE bundle zip (version from version.json).
 # Contains the cross-compiled (win-x64, self-contained) engine + browser host +
 # CLI + browser extensions + native-messaging registration script + docs.
 # The Flutter UI is NOT included (needs a Windows host — see README-WINDOWS.md
 # and .github/workflows/windows-build.yml).
 set -euo pipefail
 ROOT=/home/z/my-project
-VER=1.6.0
+VER=$(python3 -c 'import json;print(json.load(open("/home/z/my-project/version.json"))["version"])' 2>/dev/null || echo 1.7.0)
 NAME="nova-engine-${VER}-win-x64"
 STAGE="$ROOT/download/stage-$NAME"
 OUT="$ROOT/download/$NAME.zip"

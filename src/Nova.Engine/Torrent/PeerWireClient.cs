@@ -142,7 +142,7 @@ public sealed class PeerWireClient : IAsyncDisposable
         var dict = BencValue.OfDict()
             .Set("m", m)
             .Set("p", BencValue.Of((_tcp.Client.LocalEndPoint as IPEndPoint)?.Port ?? 0))
-            .Set("v", BencValue.Of("Nova DM 1.6.0"))
+            .Set("v", BencValue.Of(Nova.Domain.VersionInfo.PeerWireClient))
             .Set("reqq", BencValue.Of(PeerWireClient.MaxPendingBlocks));
         if (MetadataSize >= 0)
             dict.Set("metadata_size", BencValue.Of(MetadataSize));

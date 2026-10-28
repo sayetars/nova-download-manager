@@ -19,7 +19,20 @@ permissions:
   contents: write
 
 jobs:
+  audit:
+    name: Version audit (version.json SSOT)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: sync_versions --check (all surfaces must match version.json)
+        run: python3 scripts/sync_versions.py --check
+
   windows:
+    needs: audit
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
@@ -89,8 +102,9 @@ jobs:
           Copy-Item publish\win-x64\browserhost\* dist\browserhost\ -Recurse
           Copy-Item publish\win-x64\cli\* dist\cli\ -Recurse
           Copy-Item apps\nova_desktop\build\windows\x64\runner\Release\* dist\ -Recurse
-          Copy-Item extensions\chromium\nova-chromium-1.6.0.zip dist\extensions\
-          Copy-Item extensions\firefox\nova-firefox-1.6.0.zip dist\extensions\
+          # wildcard names: version comes from version.json (scripts/sync_versions.py audit)
+          Copy-Item extensions\chromium\nova-chromium-*.zip dist\extensions\
+          Copy-Item extensions\firefox\nova-firefox-*.zip dist\extensions\
 
       - name: Build installer (iscc)
         shell: cmd

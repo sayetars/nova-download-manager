@@ -201,10 +201,12 @@ public class HlsDownloadTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Encrypted_Hls_Is_Rejected()
+    public async Task SampleAes_Hls_Is_Rejected_As_Drm()
     {
+        // v1.7.0: AES-128 is downloaded and decrypted (see V170Tests) — only real DRM (SAMPLE-AES /
+        // external key systems) is refused.
         _server.AddText("enc.m3u8",
-            "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"k.bin\"\n#EXTINF:4,\ns.ts\n#EXT-X-ENDLIST\n");
+            "#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"k.bin\"\n#EXTINF:4,\ns.ts\n#EXT-X-ENDLIST\n");
         var res = _fx.Engine.Add(new NewDownload { Url = _server.UrlFor("enc.m3u8"), Kind = DownloadKind.Hls });
         var key = res.Value!.TaskKey;
         _fx.Engine.TryStartNext();

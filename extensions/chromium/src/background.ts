@@ -195,6 +195,11 @@ async function handle(msg: BgRequest, sender?: RuntimeSender): Promise<BgRespons
   switch (msg.type) {
     case 'hello':
       return { ok: engineUp, data: { engine: engineUp } };
+    case 'engine-status': {
+      // v1.7.0 version integrity: raw engine_status for the options About section.
+      const r = await postToHost({ type: 'engine_status' });
+      return r;
+    }
     case 'seen-media': {
       const tabId = sender?.tab?.id;
       const items = tabId != null ? (tabMedia.get(tabId) ?? []).filter(
