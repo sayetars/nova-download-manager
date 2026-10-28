@@ -56,6 +56,7 @@ def classify(path: str) -> tuple[str, str]:
     if top == "builds":
         ok = (
             (name.startswith("nova-dm-") and name.endswith("-linux-x64.tar.gz"))
+            or (name.startswith("nova-engine-") and name.endswith("-win-x64.zip"))
             or (name.startswith("nova-chromium-") and name.endswith(".zip"))
             or (name.startswith("nova-firefox-") and name.endswith(".zip"))
             or name.endswith(".sha256")
