@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="SSH.NET" Version="2026.0.0" />
+    <ProjectReference Include="..\Nova.Core\Nova.Core.csproj" />
+    <ProjectReference Include="..\Nova.Ipc\Nova.Ipc.csproj" />
+    <ProjectReference Include="..\Nova.Storage\Nova.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Nova.Tests" />
+  </ItemGroup>
+</Project>

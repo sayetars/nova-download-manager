@@ -1,14 +1,10 @@
-# build outputs
 bin/
 obj/
-dist/
-build/
-tools/
+publish/
+*.user
+.vs/
 .dart_tool/
-
-# runtime data
+build/
 *.db
-*.db-wal
-*.db-shm
-*.log
-*.sock
+*.novapart
+artifacts/*.exe

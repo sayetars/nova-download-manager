@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Windows-specific APIs are referenced by IPC transports at runtime, never at compile time -->
+    <DefineConstants>$(DefineConstants);NOVA_ENGINE</DefineConstants>
+  </PropertyGroup>
+
+</Project>

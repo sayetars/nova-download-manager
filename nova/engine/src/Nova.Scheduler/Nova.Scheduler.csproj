@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nova.Core\Nova.Core.csproj" />
+    <ProjectReference Include="..\Nova.Engine\Nova.Engine.csproj" />
+    <ProjectReference Include="..\Nova.Storage\Nova.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Nova.Tests" />
+  </ItemGroup>
+</Project>

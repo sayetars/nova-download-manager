@@ -1,63 +1,87 @@
 # Nova Download Manager
 
-IDM-class download manager for Windows 11 — **Flutter/Dart UI** + **C#/.NET 8 engine** + Chrome/Brave/Firefox extensions (in progress).
+Windows 11 professional download manager — full IDM-class feature set, open
+architecture, bilingual (English / فارسی with complete RTL).
 
-## Repository layout
+## Architecture
 
-| Path | What it is |
-|---|---|
-| `engine/Nova.DownloadEngine` | .NET 8 engine: multi-segment HTTP Range downloads, pause/resume, crash recovery, SQLite persistence, versioned JSON IPC (Named Pipes on Windows / Unix sockets for self-test) |
-| `app/` | Flutter UI (scaffold — full bilingual EN/FA+RTL UI lands in next rounds) |
-| `scripts/` | Local build + self-test scripts |
-| `.github/workflows/windows-build.yml` | Cloud Windows build on a free GitHub-hosted runner |
-| `installer/` | Packaging assets |
-| `worklog/` | Per-round engineering log |
+```
+┌──────────────────┐   Named Pipes (Win) / UDS (Linux dev)
+│   Flutter UI     │◄──────────────────────────────┐
+│   (Dart)         │                                │
+└──────────────────┘                                │
+                                                    │
+┌──────────────────┐   stdio: Native Messaging      │
+│ Browser ext.      │◄──────────┐                   │
+│ Chrome MV3/FF     │           │                   │
+└──────────────────┘   ┌────────┴─────────┐         │
+                       │ nova-host        ├─────────┘
+                       │ (C# .NET 8 LTS)  │
+                       │  • engine daemon  │
+                       │  • native host    │
+                       │  • CLI            │
+                       └───────┬──────────┘
+                               │ SQLite = single source of truth
+                        ┌──────┴──────────┐
+                        │  nova.db         │
+                        └─────────────────┘
+```
+
+- **engine/** — C#/.NET 8 (LTS) download engine. Multi-segment HTTP(S)
+  with dynamic work stealing, resume with ETag validation, crash recovery
+  from SQLite, FTP/FTPS/SFTP, HLS (AES-128) + DASH, yt-dlp bridge,
+  debrid unrestricting, DLC/RSDF/CCF containers, Site Grabber,
+  queues + scheduler (Gregorian AND Jalali), speed governor, checksums.
+- **app/** — Flutter Windows UI: task list, speed graph, video preview
+  while downloading (media_kit on .novapart), bilingual EN/FA with RTL.
+- **extensions/chrome** — MV3 for Chrome/Brave/Edge: download
+  interception, video sniffer (m3u8/mpd/DOM/size), quality panel.
+- **extensions/firefox** — same feature set, Firefox manifest.
+- **installer/** — Inno Setup script (HKCU native-host registration,
+  novadl:// protocol, bilingual installer).
+- **.github/workflows/windows-release.yml** — CI on `windows-latest`:
+  tests the engine, publishes self-contained exe, builds Flutter UI,
+  packages the installer, cuts a GitHub release on tags.
 
 ## Build
 
-### Full app for Windows — without a Windows machine (GitHub Actions)
-
-1. Push/import this repo to a (public = free) GitHub repository.
-2. **Actions → "Windows Build" → Run workflow**.
-3. Download the `Nova-Windows-x64` artifact (portable zip).
-
-### Full app for Windows — locally
-
-Requires Windows 11 + .NET 8 SDK + Flutter stable + VS 2022 "Desktop development with C++":
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1
-```
-
-### Engine only (cross-compiles from Linux/macOS too)
-
+### Engine (Linux self-test)
 ```bash
-dotnet publish engine/Nova.DownloadEngine -c Release -r win-x64 --self-contained true \
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist/win-x64
+cd engine
+dotnet test Nova.sln                      # 23 unit tests
+dotnet run --project scripts/IntegrationCheck   # end-to-end over UDS
 ```
 
-### Self-tests (any OS)
-
+### Engine → Windows binary (cross-compile from Linux)
 ```bash
-python3 scripts/test_range_server.py 8798 &                 # fast range-capable test server
-dotnet run --project engine/Nova.DownloadEngine -- download http://127.0.0.1:8798/test.bin --segments 4
-python3 scripts/test_range_server.py 8799 slow &           # slow server for pause/resume test
-dotnet run --project engine/Nova.DownloadEngine -- serve &  # engine service (UDS on Linux)
-python3 scripts/ipc_flow.py                                # ping -> add -> pause -> resume -> sha256 check
+cd engine
+dotnet publish src/Nova.Host/Nova.Host.csproj -c Release -r win-x64 \
+  --self-contained true -p:PublishSingleFile=true \
+  -o publish/win-x64
 ```
 
-## IPC protocol (v1)
+### Full Windows build (CI)
+Push a tag `v*` — or run the workflow manually — and
+`.github/workflows/windows-release.yml` produces
+`NovaDownloadManager-Windows-x64.zip` + installer.
 
-Newline-delimited JSON over Named Pipe `nova-engine-v1` (Windows) or Unix socket `/tmp/nova-engine-v1.sock` (self-test):
-
-```json
-{"v":1,"type":"add-download","payload":{"url":"https://example.com/file.zip","segments":8}}
+## CLI (IDM gap — quick terminal control)
+```
+nova-host cli add https://example.com/file.zip -o D:\Downloads
+nova-host cli list
+nova-host cli pause <taskId> | resume <id> | cancel <id>
+nova-host cli speed 2048        # KB/s; 0 = unlimited
+nova-host cli grab https://site.com -d 2 -f "*.jpg;*.png"
 ```
 
-Reply: `{"ok":true,"data":{...}}`. Commands: `ping`, `add-download`, `list-downloads`, `pause-download`, `resume-download`, `cancel-download`.
+## Native messaging setup (dev)
+```
+nova-host install-chrome-host --exe <path to nova-host.exe>
+reg add "HKCU\Software\Google\Chrome\NativeMessagingHosts\com.nova.downloadmanager" ^
+  /ve /t REG_SZ /d "%LOCALAPPDATA%\Nova\com.nova.downloadmanager.chrome.json" /f
+```
 
-## Status (end of round 12)
+## Status
 
-- Engine v0.1 — **done, self-tested** (multi-segment + pause/resume + recovery + IPC)
-- Flutter UI — scaffold
-- Video detection overlay, browser extensions, yt-dlp bridge, scheduler/queues, speed limiter — roadmap (see `worklog/`)
+See `worklog/SESSIONS.md` for the full build diary and
+`worklog/KNOWN-LIMITATIONS.md` for what is not done yet.

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Nova.Host</RootNamespace>
+    <AssemblyName>nova-host</AssemblyName>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nova.Engine\Nova.Engine.csproj" />
+    <ProjectReference Include="..\Nova.Ipc\Nova.Ipc.csproj" />
+    <ProjectReference Include="..\Nova.Scheduler\Nova.Scheduler.csproj" />
+    <ProjectReference Include="..\Nova.Storage\Nova.Storage.csproj" />
+  </ItemGroup>
+
+</Project>

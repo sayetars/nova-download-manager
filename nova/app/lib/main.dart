@@ -1,61 +1,55 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-void main() => runApp(const NovaApp());
+import 'services/app_model.dart';
+import 'pages/main_page.dart';
 
-/// Nova Download Manager — UI scaffold (round 12).
-/// Full bilingual (EN / FA + RTL) interface lands in the next rounds; the engine
-/// (versioned JSON IPC over Named Pipe / Unix socket) is already shipped and tested.
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const NovaApp());
+}
+
 class NovaApp extends StatelessWidget {
   const NovaApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Nova Download Manager',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
+    return ChangeNotifierProvider(
+      create: (_) => AppModel()..start(),
+      child: Consumer<AppModel>(
+        builder: (context, model, _) => MaterialApp(
+          title: 'Nova Download Manager',
+          debugShowCheckedModeBanner: false,
+          // RTL for Persian
+          builder: (context, child) =>
+              Directionality(textDirection: TextDirection.ltr, child: child!),
+          theme: _lightTheme(),
+          darkTheme: _darkTheme(),
+          themeMode: ThemeMode.system,
+          home: const MainPage(),
+        ),
+      ),
+    );
+  }
+
+  ThemeData _lightTheme() => ThemeData(
         useMaterial3: true,
-        brightness: Brightness.dark,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF7C5CFC),
+          seedColor: const Color(0xFF2563EB),
+          brightness: Brightness.light,
+        ),
+        fontFamily: 'Segoe UI',
+      );
+
+  ThemeData _darkTheme() => ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF2563EB),
           brightness: Brightness.dark,
         ),
-      ),
-      home: const HomePage(),
-    );
-  }
-}
-
-class HomePage extends StatelessWidget {
-  const HomePage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Nova Download Manager'),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.download_for_offline_outlined, size: 72),
-            const SizedBox(height: 16),
-            Text(
-              'Nova UI scaffold v0.1',
-              style: Theme.of(context).textTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Engine v0.1.0 is built, self-tested and packaged alongside this app.\n'
-              'The full bilingual (English / فارسی RTL) interface is under construction.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+        fontFamily: 'Segoe UI',
+      );
 }

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root { color-scheme: light dark; }
+    body { width: 340px; margin: 0; font: 13px/1.5 system-ui, sans-serif; }
+    .head { background: #1e293b; color: #fff; padding: 12px 14px; font-weight: 600; display: flex; justify-content: space-between; }
+    .speed { font-weight: 400; opacity: .85; font-variant-numeric: tabular-nums; }
+    .sec { padding: 10px 14px; border-bottom: 1px solid rgba(128,128,128,.2); }
+    .sec h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; opacity: .6; }
+    .row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; gap: 8px; }
+    .row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+    .row .meta { opacity: .65; font-size: 11px; }
+    .video { display: flex; flex-direction: column; gap: 2px; padding: 8px; margin: 6px 0; border: 1px solid rgba(128,128,128,.25); border-radius: 8px; }
+    .video .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .video .badges { display: flex; gap: 6px; font-size: 11px; opacity: .8; flex-wrap: wrap; }
+    .badge { background: rgba(37,99,235,.15); color: #2563eb; border-radius: 4px; padding: 1px 6px; }
+    .video .dl { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+    .toggle { display: flex; justify-content: space-between; padding: 5px 0; }
+    .footer { padding: 8px 14px; opacity: .6; font-size: 11px; }
+    button.link { background: none; border: none; color: #2563eb; cursor: pointer; padding: 0; font: inherit; }
+    .empty { opacity: .55; padding: 6px 0; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <span>Nova Download Manager</span>
+    <span class="speed" id="speed"></span>
+  </div>
+
+  <div class="sec">
+    <h3 data-i18n="videos">Videos on this page</h3>
+    <div id="videos"><div class="empty" data-i18n="scanWait">Scanning…</div></div>
+  </div>
+
+  <div class="sec">
+    <h3 data-i18n="settings">Settings</h3>
+    <div class="toggle"><span data-i18n="intercept">Intercept browser downloads</span><input type="checkbox" id="opt-intercept"></div>
+    <div class="toggle"><span data-i18n="sniff">Detect videos automatically</span><input type="checkbox" id="opt-sniff"></div>
+  </div>
+
+  <div class="footer">
+    <button class="link" id="open-app" data-i18n="openApp">Open Nova app</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
