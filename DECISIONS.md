@@ -100,3 +100,11 @@ reason: the 2026-10-28 partial reset destroyed the only local copy; it was recov
 evidence: worklog.md in .gitignore line 5; backup.py STATE_DOCS; the recovery performed this session.
 tradeoff: /state/ holds exactly one generation (latest overwrite) — worklog history between backups is not versioned remotely (mitigated by keep-3 checkpoints that each embed it).
 consequence: every backup.py run MUST see worklog.md on disk; sessions must append entries before uploading.
+
+## D-011 — T-020 history rewrite: tools/dotnet runtime removal (2026-10-29)
+decision: a full .NET 8.0.33 runtime tree (tools/dotnet, 185 MB tracked / 76 MB in .git) had been accidentally committed by an interim restore commit and shipped inside every source checkpoint (128 MB archive — over the 62.9 MB CLOUD-POLICY budget). Untracked it, hardened .gitignore (tools/dotnet/, tools/llvm*/), and rewrote history with filter-branch (git rm --cached --ignore-unmatch tools/dotnet -- --all) + reflog expire + gc --prune=now.
+hash map (old → new): v1.6.0 commit 301905d → 93ce179; untrack commit 68af332 → cf777b1; HEAD 7a99577 (inventory fix) is post-rewrite native. Tag v1.4.0 unchanged.
+reason: zero references to tools/dotnet anywhere (grep across scripts/tests/src/docs/installer); the active toolchain lives in sdk/dotnet (RECOVERY §2). CLOUD-POLICY forbids runtimes/SDKs in the cloud.
+evidence: tracked set 184.9 MB → 2.2 MB; .git 76 MB → 1.1 MB; git fsck clean post-rewrite; the 128 MB checkpoint was deleted from /backups/ and re-created at 1.5 MB; inventory JUNK=0 after also teaching inventory.py the nova-engine-*-win-x64.zip asset pattern.
+tradeoff: all commit hashes after the restore-era commit changed again (second rewrite since D-010); the mapping above + backups supersede older hashes.
+consequence: restore.py users must re-clone from the newest checkpoint; any bookmarked hashes older than this session are invalid.
