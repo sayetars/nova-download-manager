@@ -1,0 +1,80 @@
+name: Windows Build
+
+# Builds the complete Nova Download Manager for Windows x64 on a free
+# GitHub-hosted Windows runner — no Windows machine required locally.
+#   1. push this repo to GitHub
+#   2. Actions -> "Windows Build" -> Run workflow
+#   3. download the "Nova-Windows-x64" artifact
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Configure Flutter
+        run: |
+          flutter config --enable-windows-desktop
+          flutter --version
+
+      - name: Build engine (win-x64, self-contained single file)
+        run: dotnet publish engine/Nova.DownloadEngine -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o build/engine
+
+      - name: Ensure Windows runner project exists
+        working-directory: app
+        run: if (-not (Test-Path windows)) { flutter create --platforms=windows --org ai.nova . }
+
+      - name: Build Flutter UI
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build windows --release
+
+      - name: Assemble portable package
+        run: |
+          $out = 'dist/Nova-Windows-x64'
+          New-Item -ItemType Directory -Force -Path "$out/engine" | Out-Null
+          Copy-Item -Recurse -Force app/build/windows/x64/runner/Release/* $out
+          Copy-Item -Force build/engine/NovaEngine.exe $out/engine/
+          Copy-Item -Force installer/README-ENGINE.txt $out/engine/README.txt
+          Copy-Item -Force README.md $out/
+          Compress-Archive -Force -Path $out -DestinationPath Nova-Windows-x64.zip
+          Get-ChildItem dist -Recurse -File | Select-Object -ExpandProperty FullName
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nova-Windows-x64
+          path: Nova-Windows-x64.zip
+          if-no-files-found: error
+
+      - name: Attach to release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Nova-Windows-x64.zip

@@ -1,0 +1,14 @@
+# build outputs
+bin/
+obj/
+dist/
+build/
+tools/
+.dart_tool/
+
+# runtime data
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.sock
