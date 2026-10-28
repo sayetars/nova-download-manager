@@ -23,7 +23,7 @@ next:
 
 evidence:
 - git fsck clean post-rewrite; 21 commits; tracked 2.7 MiB; PROJECT-TREE.txt 264 files.
-- inventory.py post-cleanup: JUNK=0, folder ≈ 49 MiB (was 452.7 MiB).
+- inventory.py post-cleanup: JUNK=0, folder 47.6 MiB / 20 files (was 452.7 MiB / 28); account 1.29/2.00 GiB used (was 1.68 GiB) → 0.71 GiB free.
 - lean checkpoint uploaded + remote size verified by backup.py; extension zips + .sha256 in builds/.
 
 blockers: none (builds blocked on toolchain rebuild only)

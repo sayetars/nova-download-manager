@@ -87,10 +87,10 @@ consequence: one package serves both runtime and runtime-less machines.
 D-010 · 2026-10-28 (T-019)
 decision: Cloud retention policy (user directive, formalized in CLOUD-POLICY.md): Dropbox carries ONLY lean source checkpoints (keep 3), current+previous release assets, and the state/worklog doc tree. To make checkpoints lean, git history was REWRITTEN (filter-branch) to purge accidentally-committed build outputs (publish/, tool-results/) — .git 224 MiB → 976 KiB; tracked set 87 MiB → 2.7 MiB; all 21 commit hashes changed. Hash map (old→new): HEAD 52f3d15 → 6e005ae; v1.5.0 ef6a00f → 90db0d9; v1.4.1 a2fb028 → af85119; v1.4.0 tag → f46b257.
 alternatives: keep fat history and buy Dropbox space; orphan fresh history (loses provenance); no rewrite, exclude-only going forward (leaves 405 MiB of bloated backups in the cloud forever).
-reason: account measured at 1.81/2.00 GiB used; the two v1.4.1 "source" backups were 220.2 + 185.0 MiB because publish/ binaries (incl. a 72 MiB self-contained NovaEngine) and 12 tool-results/*.txt had been committed to git — build outputs were being archived and uploaded as "sources", exactly what the user banned.
+reason: account measured at 1.81 GB (1.68 GiB) of 2.00 GiB used; the two v1.4.1 "source" backups were 220.2 + 185.0 MiB because publish/ binaries (incl. a 72 MiB self-contained NovaEngine) and 12 tool-results/*.txt had been committed to git — build outputs were being archived and uploaded as "sources", exactly what the user banned.
 evidence: tools/dropbox/inventory.py output; the two remote manifests (file_count 301/315, sizes 194/221 MiB); git ls-files publish = 58 files / 84 MiB pre-purge; git fsck clean post-purge.
 tradeoff: old commit hashes referenced in pre-T-019 documents no longer resolve (map above); remote metadata (size + sha256) must be re-verified after upload (backup.py does).
-consequence: checkpoints are now ~2-3 MiB; keep-3 pruning + 10 MiB per-file guard + 60 MiB archive ceiling in backup.py; inventory.py is the audit gate (JUNK must be empty).
+consequence: checkpoints are now ~1.4 MiB (v1.5.0 measured); keep-3 pruning + 10 MiB per-file guard + 60 MiB archive ceiling in backup.py; inventory.py is the audit gate (JUNK must be empty).
 
 ---
 D-011 · 2026-10-28 (T-019)

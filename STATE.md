@@ -8,7 +8,7 @@ CURRENT SUBSTEP: —
 DONE: v1.0.x / v1.1.0 / v1.2.0 / v1.3.0 / v1.4.0 / v1.4.1 / v1.5.0 releases (VERSIONS.md); T-019 cloud hygiene (this session).
 NEXT: (1) user test v1.5.0 — binary must be rebuilt first (toolchain lost in the partial reset; RECOVERY.md §2); (2) v1.5.x candidates: yt-dlp native-merge mode (video+audio via yt-dlp itself), in-app embedded player (libmpv decision), DHT peer-store persistence, uTP/PEX flag byte; (3) Windows release path when a Windows host is available.
 BLOCKERS: none (any build requires the toolchain rebuild first)
-LAST VERIFIED: 2026-10-28 — git fsck clean post-rewrite (21 commits, tracked 2.7 MiB); lean source checkpoint uploaded + remote size verified; cloud inventory post-cleanup: JUNK=0, folder ≈ 49 MiB (was 452.7 MiB), account ≈ 1.41/2.00 GiB used (was 1.81).
+LAST VERIFIED: 2026-10-28 — git fsck clean post-rewrite (21 commits, tracked 2.7 MiB); lean source checkpoint uploaded + remote size verified; cloud inventory post-cleanup: JUNK=0, folder 47.6 MiB / 20 files (was 452.7 MiB / 28 files); account 1.29/2.00 GiB used (was 1.68 GiB) → 0.71 GiB free.
 RULES VERSION: UNIVERSAL-RULES.md v1 (sha256 87de0baac75ab719a23d2b83e86db430…, 3594 lines)
 ENVIRONMENT STATE: PARTIAL RESET 2026-10-28 — sdk/, ~/tools/, download/ GONE (dotnet + flutter NOT installed → rebuild per RECOVERY.md §2); survived: git repo (rewritten history, clean) + publish/ (engine binaries, untracked, kept for local testing only) + apps + extension zips + .venv (cmake/ninja); no root; no background process survival between tool calls; 2 CPUs.
 ```
