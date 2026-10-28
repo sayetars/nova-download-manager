@@ -39,3 +39,8 @@ publish/
 tool-results/
 .backup-tmp/
 extensions/*/nova-*.zip
+
+# never track toolchains/runtimes (CLOUD-POLICY)
+tools/dotnet/
+tools/llvm*/
+
