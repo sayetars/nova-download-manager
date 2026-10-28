@@ -1,6 +1,6 @@
 # PROJECT-TREE — Nova Download Manager
-# version v1.5.0 · git 6e005ae · 2026-10-28T15:57:26
-# exact file-set carried by the Dropbox source checkpoint (264 files, 2,177,431 bytes uncompressed)
+# version v1.5.0 · git ccd68c1 · 2026-10-28T16:01:23
+# exact file-set carried by the Dropbox source checkpoint (269 files, 2,217,109 bytes uncompressed)
 # (regenerate: python3 scripts/gen_project_tree.py)
 
 .env
@@ -11,6 +11,7 @@ DECISIONS.md
 Directory.Build.props
 Nova.sln
 PROJECT-RULES.md
+PROJECT-TREE.txt
 README.md
 RECOVERY.md
 RESUME-POINT.md
@@ -172,6 +173,8 @@ installer/
     register-browser-host.sh
   nova-installer.iss
 scripts/
+  __pycache__/
+    gen_project_tree.cpython-312.pyc
   bt_debug.csx
   bt_e2e_debug.csx
   build-dev.sh
@@ -184,6 +187,7 @@ scripts/
   fix-sysroot.sh
   flutter-releases.json
   flutter-url.txt
+  gen_project_tree.py
   linux/
     bootstrap_toolchain.sh
     demo_download_shot.sh
@@ -317,6 +321,9 @@ tests/
     V150Tests.cs
 tools/
   dropbox/
+    __pycache__/
+      backup.cpython-312.pyc
+      inventory.cpython-312.pyc
     backup.py
     dropbox.py
     inventory.py
