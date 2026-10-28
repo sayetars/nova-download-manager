@@ -82,3 +82,21 @@ reason: user asked for a build "to test" — friction must be near-zero on any L
 evidence: clean-env (env -i, no dotnet) boot test — socket, ipc.token, nova.db all created; swap logic verified by size heuristic (apphost <1 MB vs single-file ~67 MB).
 tradeoff: tarball grows to ~71 MB; swap mutates the extracted tree (documented).
 consequence: one package serves both runtime and runtime-less machines.
+
+---
+D-010 · 2026-10-28 (T-019)
+decision: Cloud retention policy (user directive, formalized in CLOUD-POLICY.md): Dropbox carries ONLY lean source checkpoints (keep 3), current+previous release assets, and the state/worklog doc tree. To make checkpoints lean, git history was REWRITTEN (filter-branch) to purge accidentally-committed build outputs (publish/, tool-results/) — .git 224 MiB → 976 KiB; tracked set 87 MiB → 2.7 MiB; all 21 commit hashes changed. Hash map (old→new): HEAD 52f3d15 → 6e005ae; v1.5.0 ef6a00f → 90db0d9; v1.4.1 a2fb028 → af85119; v1.4.0 tag → f46b257.
+alternatives: keep fat history and buy Dropbox space; orphan fresh history (loses provenance); no rewrite, exclude-only going forward (leaves 405 MiB of bloated backups in the cloud forever).
+reason: account measured at 1.81/2.00 GiB used; the two v1.4.1 "source" backups were 220.2 + 185.0 MiB because publish/ binaries (incl. a 72 MiB self-contained NovaEngine) and 12 tool-results/*.txt had been committed to git — build outputs were being archived and uploaded as "sources", exactly what the user banned.
+evidence: tools/dropbox/inventory.py output; the two remote manifests (file_count 301/315, sizes 194/221 MiB); git ls-files publish = 58 files / 84 MiB pre-purge; git fsck clean post-purge.
+tradeoff: old commit hashes referenced in pre-T-019 documents no longer resolve (map above); remote metadata (size + sha256) must be re-verified after upload (backup.py does).
+consequence: checkpoints are now ~2-3 MiB; keep-3 pruning + 10 MiB per-file guard + 60 MiB archive ceiling in backup.py; inventory.py is the audit gate (JUNK must be empty).
+
+---
+D-011 · 2026-10-28 (T-019)
+decision: worklog.md stays OUT of git (.gitignore) by design; its ONLY cloud copy is the /state/ live mirror written by backup.py (STATE_DOCS). A PROJECT-TREE.txt snapshot is generated from the exact backup file-set (scripts/gen_project_tree.py) and mirrored alongside it.
+alternatives: commit worklog.md to git (mixes append-only narrative with code history; bloats diffs); keep it only on disk (lost in resets — exactly what happened on 2026-10-28).
+reason: the 2026-10-28 partial reset destroyed the only local copy; it was recovered from Dropbox /state/worklog.md (v1.4.1-era) and reconstructed for T-018/T-019.
+evidence: worklog.md in .gitignore line 5; backup.py STATE_DOCS; the recovery performed this session.
+tradeoff: /state/ holds exactly one generation (latest overwrite) — worklog history between backups is not versioned remotely (mitigated by keep-3 checkpoints that each embed it).
+consequence: every backup.py run MUST see worklog.md on disk; sessions must append entries before uploading.

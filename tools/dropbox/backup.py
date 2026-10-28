@@ -10,11 +10,11 @@ Security (UNIVERSAL-RULES 79/95):
   - Databases, build outputs, SDKs, node_modules, skills/ are excluded.
   - Manifest carries SHA-256; restore verifies it before extraction.
 
-Layout on Dropbox:
-  /Nova-Download-Manager/backups/nova-dm-src-<version>-<YYYYMMDD-HHMMSS>.tar.gz
+Layout on Dropbox (retention rules: CLOUD-POLICY.md — the user's directive):
+  /Nova-Download-Manager/backups/nova-dm-src-<version>-<YYYYMMDD-HHMMSS>.tar.gz  (keep 3)
   /Nova-Download-Manager/backups/nova-dm-src-...manifest.json
-  /Nova-Download-Manager/state/<doc>          (live state mirrors)
-  /Nova-Download-Manager/builds/              (handled by build scripts)
+  /Nova-Download-Manager/state/<doc>          (live state + worklog tree mirrors)
+  /Nova-Download-Manager/builds/               (release assets only, via build scripts)
 """
 from __future__ import annotations
 
@@ -37,12 +37,16 @@ ROOT_REMOTE = "/Nova-Download-Manager"
 STATE_DOCS = [
     "STATE.md", "RESUME-POINT.md", "worklog.md", "VERSIONS.md",
     "DECISIONS.md", "RECOVERY.md", "RULES-READ-LEDGER.md",
-    "PROJECT-RULES.md", "UNIVERSAL-RULES.md",
+    "PROJECT-RULES.md", "UNIVERSAL-RULES.md", "CLOUD-POLICY.md",
+    "PROJECT-TREE.txt",
 ]
 EXCLUDE_NAMES = {".dropbox-credentials.json", ".access-token.json"}
 EXCLUDE_DIRS = {"sdk", "node_modules", "upload", "download", "skills",
-                ".backup-tmp", "__pycache__"}
+                ".backup-tmp", "__pycache__", "publish", "tool-results"}
 EXCLUDE_SUFFIXES = (".db", ".db-shm", ".db-wal", ".novadl", ".log", ".part")
+# CLOUD-POLICY guards (user directive 2026-10-28): the checkpoint must stay lean.
+MAX_FILE_BYTES = 10 * 1024 * 1024     # no single archived file > 10 MiB
+MAX_ARCHIVE_BYTES = 60 * 1024 * 1024  # sanity ceiling for the whole checkpoint
 
 
 def git(*args) -> str:
@@ -121,7 +125,7 @@ def build_archive(out: Path, files: list[Path]) -> tuple[str, int]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--keep", type=int, default=10,
+    ap.add_argument("--keep", type=int, default=3,
                     help="retain the N newest remote source backups (0 = never prune)")
     ap.add_argument("--dry-run", action="store_true",
                     help="build archive locally, skip upload")
@@ -135,6 +139,14 @@ def main() -> int:
 
     files = collect_files()
     files = [p for p in files if _keep(p)]
+    # CLOUD-POLICY per-file guard: never archive a suspiciously large file.
+    for p in files:
+        if p.stat().st_size > MAX_FILE_BYTES:
+            print(f"[backup] WARNING: skipping oversized {p} "
+                  f"({p.stat().st_size:,} B > {MAX_FILE_BYTES:,} B); "
+                  f"content stays recoverable via .git if tracked",
+                  file=sys.stderr)
+    files = [p for p in files if p.stat().st_size <= MAX_FILE_BYTES]
     if not files:
         print("ERROR: no files collected — refusing to upload empty backup")
         return 3
@@ -142,6 +154,10 @@ def main() -> int:
     print(f"[backup] {len(files)} files, version={version}")
     digest, size = build_archive(arch, files)
     print(f"[backup] archive {arch} ({size:,} bytes, sha256 {digest[:16]}...)")
+    if size > MAX_ARCHIVE_BYTES:
+        print(f"[backup] WARNING: archive {size:,} B exceeds the "
+              f"{MAX_ARCHIVE_BYTES:,} B CLOUD-POLICY budget — investigate "
+              f"before relying on this checkpoint", file=sys.stderr)
 
     manifest = {
         "kind": "nova-dm-source-checkpoint",

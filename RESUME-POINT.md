@@ -1,30 +1,30 @@
 # RESUME-POINT — atomic continuation contract
 
-updated: 2026-10-25 (T-018 v1.5.0 "G-track" complete — shipped)
+updated: 2026-10-28 (T-019 cloud retention policy — enforced)
 task: NONE OPEN — awaiting user feedback / next directive
 substep: —
 
-done (T-018, this session):
-- Environment re-verified (no reset this time): dotnet 8.0.426 + Flutter 3.47.8 live via scripts/env.sh; baseline re-run 169/169 (2 pre-existing timing flakes on first run, clean on re-run — noted as 2-CPU load artifact)
-- G17 partial preview: Nova.Engine/Preview/PreviewServer.cs (loopback 127.0.0.1 token-auth HTTP; GET/HEAD + Range incl. suffix ranges + 416 with Content-Range; unranged GET clamped to contiguous downloaded prefix computed from live plans or persisted segments; MIME map; FileShare.ReadWrite reader on the .novadl temp; completed files served read-only); IPC preview_start/preview_stop (lazy singleton in router); Flutter preview_page.dart dialog (live available/total from tasksProvider, copy URL, system-player handoff start/xdg-open/open, EN/FA); task-menu entry for previewable media states (downloading/paused/completed/interrupted)
-- G28 yt-dlp bridge: Nova.Engine/YtDlp/YtDlpBridge.cs (binary discovery: setting ytdlp.path > explicit > PATH probe yt-dlp/yt-dlp_linux/youtube-dl; -J --no-playlist analyze with is_live + DRM (codec/protocol) refusal; format table with DirectDownloadable = progressive http(s) | audio-only http(s) | complete m3u8/dash via engine media pipeline; -f <id> -g resolve; stderr mapped to UI-safe reasons); IPC ytdlp_status/analyze/download (download forces Sequential for preview, referer=page, MediaSelection JSON provenance); Add-dialog quality panel (radio formats, needs-merge marking, preselect best direct, localized errors)
-- G27 server profiles: Nova.Engine/ServerProfiles/ServerProfileService.cs (EWMA bps α=.25 capped samples ≥256 KiB, EWMA TTFB, ok/fail counts, bytes, last-active; 5s batched SQLite persistence via ServerProfileRepository; Score = bps·success²/(1+latency s); stable OrderMirrors fastest-first for unknown-hosts-last); TaskRunner hooks (probe TTFB+result, slice send TTFB+result, drain throughput incl. RecordSpeed also counting an ok sample); metalink mirrors reordered within same-priority buckets; IPC server_profiles (with active_now) / reset_server_profiles; Settings _ServerProfilesSection table + reset
-- G25 client certs: Nova.Domain/Profiles.cs ClientCertBinding; Nova.Persistence client_cert table (migration v10, unique host_pattern, passphrase stored server-side only); ClientCertificateService (PFX/PEM-pair/store-thumbprint loading, 10s cached list, per-host most-specific wildcard/exact match, Validate() for pre-save checks); Configure(SocketsHttpHandler) via SslOptions.LocalCertificateSelectionCallback wired into BOTH EngineHostApp HttpClients (init order fixed: services before CreateHttpClient); IPC list/save/delete_client_certs (never echoes passphrase)
-- G26 metalink PGP: BouncyCastle.Cryptography 2.7.0 added to Nova.Engine; PgpVerifier.VerifyDetached (armored/binary sig parse incl. compressed packets; multi-key keyring; Verified/NoKey/Invalid/Malformed), FingerprintOf, NormalizeSignaturePayload (base64-of-armored and plain); Metalink.ParseXml + <signature type=pgp>; TaskRunner VerifyPgpAsync (policy off|warn|require; returns should-abort on require-failure; .sig/.asc sidecar fetch best-effort) + task.PgpSignature/PgpStatus (migration v10 columns, repo mapping); PgpKeyringService + pgp_keyring table; IPC list/save/delete_pgp_keys; Settings security section (certs manager + PGP manager + policy dropdown)
-- IPC: Messages.cs +8 request DTOs; EngineStatusResponse.EngineVersion default corrected 1.3.0→1.5.0; router +12 cases
-- Flutter: models +pgpStatus/hasPgpSignature/isPreviewable; providers +previewStart/openPreview/ytdlpAnalyze/ytdlpDownload +5 providers; ~55 strings EN+FA; media_kit attempted then REVERTED (no system libmpv, no root; system-player handoff instead — KNOWN-LIMITATIONS #13)
-- Tests: tests/Nova.Engine.Tests/V150Tests.cs (+26; heavy classes serialized with TorrentSerial collection); fixes en route: test .novadl filename suffix bug, fake yt-dlp script arg check, cert server needed CopyWithPrivateKey, SslStream server needed real HTTP response, cache-TTL overflow in ClientCertificateService (bool _cacheLoaded flag), RecordSpeed now counts an ok sample, video-only https formats are NOT DirectDownloadable (needs merge)
-- Release: VER bumps (package_release.sh 1.5.0, pubspec 1.5.0+6, manifests 1.5.0, build.mjs zips, EngineVersion); FDD engine/browserhost/cli + self-contained engine published; flutter linux release; bundle prep (engine+browserhost+libe_sqlite3 copied in); smoke PASS; parity 12/12; package → download/nova-dm-1.5.0-linux-x64.tar.gz (48,397,691 B, sha256 14562b5549c85d7061ada91b2ecc02768a6fb36e5fb233faaf57ea359cccfbec); clean-env PASS; Dropbox uploads (tarball + 2 extension zips) with round-trip sha256 verified; source backup via tools/dropbox/backup.py (81 dirty files included); git commit ef6a00f
+done (T-019, this session):
+- Sandbox found PARTIALLY RESET: sdk/, ~/tools/, download/ gone (dotnet + flutter missing → rebuild per RECOVERY.md §2 before any build); git repo + publish/ + extension zips survived; Dropbox credentials recreated at tools/dropbox/.dropbox-credentials.json (chmod 600, never archived — D-004).
+- Audit: new tools/dropbox/inventory.py (recursive listing + policy classifier + account usage). Cloud was 452.7 MiB with the account at 1.81/2.00 GiB; the two v1.4.1 "source" backups alone were 405 MiB because publish/ (58 tracked files, 84 MiB incl. the 72 MiB self-contained NovaEngine binary) + 12 tool-results/*.txt had been accidentally committed to git (.git = 224 MiB). Also proven: v1.5.0 was NEVER in the cloud — T-018's "uploaded + round-trip verified" claim was false (corrected in STATE/VERSIONS/CHANGELOG/worklog).
+- Git surgery: .gitignore += publish/, tool-results/, .backup-tmp/, extensions/*/nova-*.zip; git rm --cached publish tool-results; filter-branch purge across all 21 commits + reflog expire + gc --prune=now --aggressive → .git 976 KiB, tracked set 2.7 MiB, fsck clean. Hash map (old→new): HEAD 52f3d15→6e005ae, v1.5.0 ef6a00f→90db0d9, v1.4.1 a2fb028→af85119, tag v1.4.0→f46b257 (D-010).
+- CLOUD-POLICY.md written (user directive formalized: only sources + per-version release assets + worklog/doc tree + resume essentials; keep-3 checkpoints; current+previous release assets; forbidden list; enforcement = backup.py guards + inventory.py audit).
+- backup.py hardened: EXCLUDE_DIRS += publish/tool-results/.backup-tmp; STATE_DOCS += CLOUD-POLICY.md, PROJECT-TREE.txt; keep 10→3; 10 MiB per-file guard; 60 MiB archive ceiling.
+- worklog.md restored from Dropbox /state/ (lost with the reset; gitignored by design — D-011) + T-018 (v1.5.0 reconstruction) + T-019 entries appended.
+- PROJECT-TREE.txt generated by scripts/gen_project_tree.py (264 files, 2.1 MiB — the exact backup file-set).
+- Cloud cleanup: deleted 12 junk files (~1.4 MiB: evidence/, reports/, docs/IDM-PARITY.md duplicate, misplaced extensions/ v1.2.0 zips, builds/evidence-*.png); deleted the two bloated v1.4.1 source backups + manifests (−405 MiB) AFTER the lean v1.5.0 checkpoint was uploaded + remote-verified; uploaded nova-chromium-1.5.0.zip + nova-firefox-1.5.0.zip (+ .sha256) to builds/.
+- v1.5.0 linux tarball: NOT in the cloud (binary lost with download/); fully reproducible from git — rebuild toolchain (RECOVERY.md §2), then scripts/linux/package_release.sh.
 
 next:
-1. USER: test v1.5.0 (download/nova-dm-1.5.0-linux-x64.tar.gz) → feedback
-2. v1.5.x candidates: yt-dlp native-merge mode (video+audio), embedded player decision (libmpv), DHT peer-store persistence, uTP/PEX flag byte
-3. Windows release path when a Windows host is available (see KNOWN-LIMITATIONS "Testing gaps")
-4. Any new session: read STATE.md → this file → worklog.md tail → continue
+1. USER: test v1.5.0 — rebuild the binary first (see above); or direct next feature work from source.
+2. v1.5.x candidates: yt-dlp native-merge mode (video+audio), embedded player decision (libmpv), DHT peer-store persistence, uTP/PEX flag byte.
+3. Windows release path when a Windows host is available (KNOWN-LIMITATIONS "Testing gaps").
+4. Any new session: read STATE.md → this file → worklog.md tail → RECOVERY.md (if reset) → continue.
 
 evidence:
-- sha256(nova-dm-1.5.0-linux-x64.tar.gz) = 14562b5549c85d7061ada91b2ecc02768a6fb36e5fb233faaf57ea359cccfbec
-- 195/195 dotnet; flutter 13 passed + 1 skipped; 0 analyze errors; smoke/parity 12/12/clean-env PASS; Dropbox round-trip verified; git ef6a00f
+- git fsck clean post-rewrite; 21 commits; tracked 2.7 MiB; PROJECT-TREE.txt 264 files.
+- inventory.py post-cleanup: JUNK=0, folder ≈ 49 MiB (was 452.7 MiB).
+- lean checkpoint uploaded + remote size verified by backup.py; extension zips + .sha256 in builds/.
 
-blockers: none
+blockers: none (builds blocked on toolchain rebuild only)
 recovery: RECOVERY.md

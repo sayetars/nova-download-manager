@@ -20,11 +20,13 @@ Priority: UNIVERSAL-RULES.md > this file. Never weaken either silently.
 - Global worklog task numbering never restarts.
 - Every meaningful substep: update RESUME-POINT.md before risky work.
 
-## Persistence policy (user-mandated)
+## Persistence policy (user-mandated 2026-10-28 — full rules: CLOUD-POLICY.md)
 - Dropbox root: /Nova-Download-Manager
-  - backups/ — source checkpoints (tar.gz + manifest.json, keep 10)
-  - builds/ — released build artifacts + SHA-256
-  - state/ — live mirror of memory docs
+  - backups/ — LEAN source checkpoints (tar.gz + manifest.json, keep 3; build outputs / tool-results / evidence NEVER enter them)
+  - builds/ — current + previous release assets + .sha256 sidecars only
+  - state/ — live mirror of memory + worklog docs (STATE, RESUME-POINT, worklog, VERSIONS, DECISIONS, RECOVERY, ledgers, CLOUD-POLICY, PROJECT-TREE)
+- Forbidden in the cloud: publish/, bin/obj/build outputs, evidence/screenshots, tool-results/, SDKs, databases, logs, credentials.
+- Audit gate before ending any upload session: `python3 tools/dropbox/inventory.py` → JUNK must be empty and the folder within budget (~150 MiB).
 - Credentials: tools/dropbox/.dropbox-credentials.json (chmod 600, gitignored, NEVER inside archives or builds).
 - After any environment reset: run restore.py latest → read RECOVERY.md → rebuild toolchain → continue.
 

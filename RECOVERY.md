@@ -72,9 +72,13 @@ cd apps/nova_desktop && flutter pub get && flutter analyze && flutter test && fl
 
 ## 5. Dropbox hygiene after every meaningful step
 ```bash
-python3 tools/dropbox/backup.py       # source checkpoint + state mirror (keep 10)
-python3 tools/dropbox/dropbox.py upload <artifact> /Nova-Download-Manager/builds/<name>
+python3 tools/dropbox/backup.py       # lean source checkpoint + state mirror (keep 3)
+python3 tools/dropbox/inventory.py    # AUDIT GATE: JUNK must be empty, budget ~150 MiB
+python3 tools/dropbox/dropbox.py upload <release-asset> /Nova-Download-Manager/builds/<name>
 ```
+Retention rules live in CLOUD-POLICY.md (user directive 2026-10-28): the cloud
+carries sources, per-version release assets, the worklog/doc tree and resume
+essentials — nothing else (never build outputs, evidence, tool-results, SDKs).
 
 ## 6. Convergence checklist (rule 35)
 - [ ] rules verified (UNIVERSAL-RULES.md present, hash matches ledger)

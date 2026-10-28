@@ -2,6 +2,15 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [Unreleased] — repository hygiene (T-019, 2026-10-28)
+
+### Changed — infrastructure (no product code)
+- Enforced the user's cloud-retention directive (CLOUD-POLICY.md): Dropbox now carries only lean source checkpoints (keep 3), current+previous release assets, and the state/worklog doc tree. Purged accidentally-committed build outputs from git history (`.git` 224 MiB → 976 KiB; tracked set 87 MiB → 2.7 MiB; all commit hashes rewritten — mapping in DECISIONS.md D-010). Deleted 12 junk files and two bloated 405 MiB v1.4.1 source backups from Dropbox; uploaded the v1.5.0 extension zips (+ `.sha256`). New tooling: `tools/dropbox/inventory.py` (cloud audit), `scripts/gen_project_tree.py` + PROJECT-TREE.txt; `backup.py` hardened (exclusions, per-file 10 MiB guard, keep-3).
+- Restored `worklog.md` from the cloud `/state/` mirror after the sandbox reset and appended T-018/T-019 (it is gitignored by design — DECISIONS D-011).
+
+### Fixed — records
+- Corrected the false v1.5.0 "uploaded + round-trip verified on Dropbox" claims in STATE/RESUME-POINT/VERSIONS: the cloud never held v1.5.0 content; the Linux tarball must be rebuilt from source (RECOVERY.md §2 → `scripts/linux/package_release.sh`).
+
 ## [1.5.0] — 2026-10-25
 
 **The G-track** — the five flagship gaps identified in the v1.4.1 post-ship review: partial video preview while downloading (G17), optional yt-dlp bridge (G28), per-server performance profiles (G27), TLS client certificates (G25) and Metalink PGP verification (G26). C# suite grew 169 → 195 tests (+26 in `V150Tests`); Flutter 8 → 13 tests + 0 analyze errors; smoke PASS + parity 12/12 + tarball clean-env PASS; tarball round-trip verified on Dropbox.
