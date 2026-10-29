@@ -397,6 +397,33 @@ abstract class S {
   String get priorityNormal;
   String get priorityLow;
   String get speedCapBytes;
+
+  // ----- v1.8.0 (IDM full-parity round)
+  String get proxyMode;
+  String get proxyManual;
+  String get proxyPac;
+  String get pacUrlLabel;
+  String get pacTest;
+  String get getSystemProxy;
+  String get systemProxyNone;
+  String get proxyRestartNote;
+  String get http2;
+  String get ignoreValidatorChange;
+  String get soundsEvents;
+  String get soundEventComplete;
+  String get soundEventError;
+  String get soundEventAdded;
+  String get soundEventAllDone;
+  String get soundFileLabel;
+  String get soundTest;
+  String get rememberCategoryDir;
+  String get progressDialogMode;
+  String get progressDialogAlways;
+  String get progressDialogMinimized;
+  String get progressDialogNever;
+  String get updateAutoCheck;
+  String get saveTo;
+  String get updateAvailableMsg;
 }
 
 class EnStrings implements S {
@@ -788,6 +815,33 @@ class EnStrings implements S {
   @override String get schedulePauseWindows => 'Pause windows';
   @override String get addWindow => 'Add window';
   @override String get alwaysOnTopMini => 'Always-on-top compact progress window';
+
+  // ----- v1.8.0 (IDM full-parity round)
+  @override String get proxyMode => 'Proxy mode';
+  @override String get proxyManual => 'Manual';
+  @override String get proxyPac => 'PAC script';
+  @override String get pacUrlLabel => 'PAC URL (http(s)://… or file path)';
+  @override String get pacTest => 'Test PAC';
+  @override String get getSystemProxy => 'Get system proxy';
+  @override String get systemProxyNone => 'No system proxy detected';
+  @override String get proxyRestartNote => 'Proxy changes apply after an engine restart';
+  @override String get http2 => 'HTTP/2 for HTTPS downloads (IDM 6.43 parity)';
+  @override String get ignoreValidatorChange => 'Ignore file modification time changes when resuming';
+  @override String get soundsEvents => 'Sounds on events';
+  @override String get soundEventComplete => 'Download complete';
+  @override String get soundEventError => 'Download failed';
+  @override String get soundEventAdded => 'Download added';
+  @override String get soundEventAllDone => 'All downloads finished';
+  @override String get soundFileLabel => 'Sound file (optional, .wav/.oga/.aiff)';
+  @override String get soundTest => 'Test';
+  @override String get rememberCategoryDir => 'Change category folder on last selected save';
+  @override String get progressDialogMode => 'Progress view on download start';
+  @override String get progressDialogAlways => 'Open details';
+  @override String get progressDialogMinimized => 'Stay in list';
+  @override String get progressDialogNever => 'Nothing';
+  @override String get updateAutoCheck => 'Auto update check (hours, 0 = off)';
+  @override String get saveTo => 'Save to (optional)';
+  @override String get updateAvailableMsg => 'A new Nova version is available';
 }
 
 class FaStrings implements S {
@@ -1178,5 +1232,32 @@ class FaStrings implements S {
   @override String get extractDone => 'استخراج تمام شد: {m}';
   @override String get convertDone => 'تبدیل تمام شد: {m}';
   @override String get convertFailed => 'تبدیل ناموفق: {m}';
-  @override String get sourcesCount => '{n} منبع';
+  @override String get sourcesCount => '{n
+  // ----- v1.8.0 (IDM full-parity round)
+  @override String get proxyMode => 'حالت پراکسی';
+  @override String get proxyManual => 'دستی';
+  @override String get proxyPac => 'اسکریپت PAC';
+  @override String get pacUrlLabel => 'نشانی PAC (http(s)://… یا مسیر فایل)';
+  @override String get pacTest => 'آزمایش PAC';
+  @override String get getSystemProxy => 'گرفتن پراکسی سامانه';
+  @override String get systemProxyNone => 'پراکسی سیستمی پیدا نشد';
+  @override String get proxyRestartNote => 'تغییرات پراکسی پس از راه‌اندازی دوبارهٔ موتور اعمال می‌شود';
+  @override String get http2 => 'HTTP/2 برای دانلودهای HTTPS (هم‌ترازی با IDM 6.43)';
+  @override String get ignoreValidatorChange => 'هنگام ازسرگیری، تغییر زمان اصلاح فایل نادیده گرفته شود';
+  @override String get soundsEvents => 'صدا برای رخدادها';
+  @override String get soundEventComplete => 'اتمام دانلود';
+  @override String get soundEventError => 'شکست دانلود';
+  @override String get soundEventAdded => 'افزوده‌شدن دانلود';
+  @override String get soundEventAllDone => 'پایان همهٔ دانلودها';
+  @override String get soundFileLabel => 'فایل صدا (اختیاری، .wav/.oga/.aiff)';
+  @override String get soundTest => 'آزمایش';
+  @override String get rememberCategoryDir => 'تغییر پوشهٔ دسته بر پایهٔ آخرین انتخاب';
+  @override String get progressDialogMode => 'نمای پیشرفت هنگام شروع دانلود';
+  @override String get progressDialogAlways => 'باز کردن جزئیات';
+  @override String get progressDialogMinimized => 'ماندن در فهرست';
+  @override String get progressDialogNever => 'هیچ';
+  @override String get updateAutoCheck => 'بررسی خودکار به‌روزرسانی (ساعت، ۰ = خاموش)';
+  @override String get saveTo => 'ذخیره در (اختیاری)';
+  @override String get updateAvailableMsg => 'نسخهٔ جدیدی از نوا در دسترس است';
+} منبع';
 }

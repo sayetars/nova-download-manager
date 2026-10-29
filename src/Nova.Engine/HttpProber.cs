@@ -69,6 +69,7 @@ public sealed class HttpProber
 
     internal static void AddDefaultHeaders(HttpRequestMessage req, string? referer)
     {
+        HttpProtocol.Apply(req); // v1.8.0: offer HTTP/2 on https (covers prober + grabber requests)
         req.Headers.UserAgent.ParseAdd(Nova.Domain.VersionInfo.UserAgent);
         req.Headers.Accept.ParseAdd("*/*");
         if (!string.IsNullOrEmpty(referer) && Uri.TryCreate(referer, UriKind.Absolute, out var refUri))

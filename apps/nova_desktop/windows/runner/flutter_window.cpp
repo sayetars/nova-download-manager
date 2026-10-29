@@ -8,6 +8,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "nova_pipe_bridge.h"
+#include "resource.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -43,6 +44,30 @@ bool FlutterWindow::OnCreate() {
       &flutter::StandardMethodCodec::instance());
   DragAcceptFiles(GetHandle(), TRUE);
 
+  // v1.8.0 (IDM tray parity): "nova/tray" — init creates the tray icon,
+  // hide/show minimize-to-tray and restore. The menu and left click notify
+  // Dart via "onTrayShow" / "onTrayExit".
+  tray_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "nova/tray",
+      &flutter::StandardMethodCodec::instance());
+  tray_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() == "init") {
+          const bool ok = TrayCreate();
+          result->Success(flutter::EncodableValue(ok));
+        } else if (call.method_name() == "hide") {
+          ::ShowWindow(GetHandle(), SW_HIDE);
+          result->Success(flutter::EncodableValue(true));
+        } else if (call.method_name() == "show") {
+          ::ShowWindow(GetHandle(), SW_SHOW);
+          ::SetForegroundWindow(GetHandle());
+          result->Success(flutter::EncodableValue(true));
+        } else {
+          result->NotImplemented();
+        }
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -56,8 +81,10 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  TrayRemove();
   pipe_bridge_.reset();
   dnd_channel_.reset();
+  tray_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -83,6 +110,25 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
+    case NOVA_TRAY_MSG: {
+      // v1.8.0: tray mouse events. lparam's LOWORD is the mouse message.
+      const UINT mouse = LOWORD(lparam);
+      if (mouse == WM_LBUTTONUP || mouse == WM_LBUTTONDBLCLK) {
+        ::ShowWindow(GetHandle(), SW_SHOW);
+        ::SetForegroundWindow(GetHandle());
+      } else if (mouse == WM_RBUTTONUP || mouse == WM_CONTEXTMENU) {
+        TrayShowMenu();
+      }
+      return 0;
+    }
+    case NOVA_TRAY_MENU_SHOW:
+      ::ShowWindow(GetHandle(), SW_SHOW);
+      ::SetForegroundWindow(GetHandle());
+      return 0;
+    case NOVA_TRAY_MENU_EXIT:
+      // Let Dart run its exit path (didRequestAppExit) for a clean shutdown.
+      TrayInvoke("onTrayExit");
+      return 0;
     case WM_DROPFILES: {
       // IDM parity: drop links/files onto the window → Add dialog prefilled.
       HDROP drop = reinterpret_cast<HDROP>(wparam);
@@ -114,4 +160,49 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+}
+
+// ---- v1.8.0 (IDM tray parity) --------------------------------------------
+
+bool FlutterWindow::TrayCreate() {
+  if (tray_created_) return true;
+  HINSTANCE instance = GetModuleHandle(nullptr);
+  tray_icon_ = {};
+  tray_icon_.cbSize = sizeof(tray_icon_);
+  tray_icon_.hWnd = GetHandle();
+  tray_icon_.uID = 1;
+  tray_icon_.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+  tray_icon_.uCallbackMessage = NOVA_TRAY_MSG;
+  tray_icon_.hIcon =
+      LoadIcon(instance, MAKEINTRESOURCE(IDI_APP_ICON));
+  if (!tray_icon_.hIcon) tray_icon_.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+  wcscpy_s(tray_icon_.szTip, L"Nova Download Manager");
+  tray_created_ = Shell_NotifyIconW(NIM_ADD, &tray_icon_) == TRUE;
+  return tray_created_;
+}
+
+void FlutterWindow::TrayRemove() {
+  if (!tray_created_) return;
+  Shell_NotifyIconW(NIM_DELETE, &tray_icon_);
+  tray_created_ = false;
+}
+
+void FlutterWindow::TrayShowMenu() {
+  HMENU menu = CreatePopupMenu();
+  AppendMenuW(menu, MF_STRING, NOVA_TRAY_MENU_SHOW, L"Open Nova");
+  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenuW(menu, MF_STRING, NOVA_TRAY_MENU_EXIT, L"Exit");
+  POINT cursor;
+  GetCursorPos(&cursor);
+  // Required so the menu dismisses when clicking elsewhere.
+  SetForegroundWindow(GetHandle());
+  TrackPopupMenu(menu, TPM_RIGHTBUTTON, cursor.x, cursor.y, 0, GetHandle(),
+                 nullptr);
+  DestroyMenu(menu);
+}
+
+void FlutterWindow::TrayInvoke(const char* method) {
+  if (tray_channel_) {
+    tray_channel_->InvokeMethod(method, nullptr);
+  }
 }

@@ -86,6 +86,8 @@ public sealed class EngineHostApp : IAsyncDisposable
             command: _settings.Get("av.command"));
         var tempRoot = _settings.Get("engine.temp_dir");
         _quota = new QuotaTracker(_settings, db: _db);
+        // v1.8.0 (IDM "Save To" tab parity): category default dirs + remember-on-last-selected
+        var categoryDirs = new Nova.Persistence.CategoryDirStore(_db);
         _engine = new DownloadEngine(
             new DownloadTaskRepository(_db), new SegmentRepository(_db),
             new QueueRepository(_db), _settings, new EngineEventBus(),
@@ -94,7 +96,9 @@ public sealed class EngineHostApp : IAsyncDisposable
             quota: _quota,
             profiles: _serverProfiles,
             pgpKeys: _pgpKeys,
-            ytdlp: _ytdlp);
+            ytdlp: _ytdlp,
+            categoryDefaultDir: categoryDirs.DirFor,
+            rememberCategoryDir: categoryDirs.SetDir);
         _engineHttpClient = _http;
 
         _scheduler = new SchedulerService(_engine, _settings, new QueueRepository(_db));
@@ -225,11 +229,41 @@ public sealed class EngineHostApp : IAsyncDisposable
 
     private readonly HttpClient _engineHttpClient;
 
+    /// <summary>v1.8.0: PAC proxy selector shared by all engine-side HTTP clients (null when PAC is off/unavailable).</summary>
+    private PacProxySelector? _pacSelector;
+
+    private PacProxySelector? BuildPacSelector(IReadOnlyDictionary<string, string> all)
+    {
+        var bypass = (all.TryGetValue("proxy.bypass", out var b) ? b : "")
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        try
+        {
+            var url = all.TryGetValue("proxy.pac_url", out var u) ? u : null;
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                EngineLog.Warn("proxy.mode=pac but proxy.pac_url is empty; falling back to direct.");
+                return null;
+            }
+            var script = PacSource.Load(url.Trim());
+            var creds = all.TryGetValue("proxy.user", out var pu) && !string.IsNullOrEmpty(pu)
+                ? new NetworkCredential(pu, all.TryGetValue("proxy.pass", out var pp) ? pp : "")
+                : null;
+            EngineLog.Info($"PAC script loaded from {url.Trim()} ({script.Length} chars).");
+            return new PacProxySelector(new PacResolver(script), bypass, creds);
+        }
+        catch (Exception ex)
+        {
+            EngineLog.Warn($"PAC script could not be loaded: {ex.Message} — falling back to direct.");
+            return null;
+        }
+    }
+
     /// <summary>Engine-wide HttpClient with the user's proxy settings applied (proxy.* keys).</summary>
     private HttpClient CreateHttpClient()
     {
         var all = _settings.GetAll();
         var proxy = ProxyConfig.FromSettings(k => all.TryGetValue(k, out var v) ? v : null);
+        HttpProtocol.UseHttp2 = all.TryGetValue("engine.http2", out var h2) ? h2 != "false" : true; // v1.8.0 (IDM 6.43 parity)
         var handler = new SocketsHttpHandler
         {
             AllowAutoRedirect = false, // we do redirects ourselves to strip auth cross-origin
@@ -240,7 +274,16 @@ public sealed class EngineHostApp : IAsyncDisposable
             PooledConnectionLifetime = TimeSpan.FromMinutes(10),
         };
         _clientCerts.Configure(handler); // v1.5.0 (G25): per-host TLS client certificates
-        if (proxy.IsValid)
+        if (proxy.UsesPac)
+        {
+            _pacSelector ??= BuildPacSelector(all);
+            if (_pacSelector is not null)
+            {
+                handler.Proxy = _pacSelector;
+                handler.UseProxy = true;
+            }
+        }
+        else if (proxy.IsValid)
             proxy.Apply(handler, "*");   // host-level bypass handled by WebProxy.BypassList
         return new HttpClient(new SafeRedirectHandler(handler)) { Timeout = Timeout.InfiniteTimeSpan };
     }
@@ -255,6 +298,7 @@ public sealed class EngineHostApp : IAsyncDisposable
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
+            HttpProtocol.Apply(request); // v1.8.0: H2 offer also for clients without task context
             var current = request;
             for (var hop = 0; ; hop++)
             {
@@ -268,6 +312,7 @@ public sealed class EngineHostApp : IAsyncDisposable
                     current.RequestUri!.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase);
 
                 var next = new HttpRequestMessage(current.Method, nextUrl);
+                HttpProtocol.Apply(next); // keep the H2 offer across redirects
                 next.Headers.Range = current.Headers.Range; // preserve range probing through redirects
                 foreach (var h in current.Headers.NonValidated)
                     if (h.Key != "Authorization" || sameOrigin)
@@ -316,7 +361,16 @@ public sealed class EngineHostApp : IAsyncDisposable
             MaxConnectionsPerServer = 64,
         };
         _clientCerts.Configure(handler); // v1.5.0 (G25): per-host TLS client certificates
-        if (proxy.IsValid)
+        if (proxy.UsesPac)
+        {
+            _pacSelector ??= BuildPacSelector(settings);
+            if (_pacSelector is not null)
+            {
+                handler.Proxy = _pacSelector;
+                handler.UseProxy = true;
+            }
+        }
+        else if (proxy.IsValid)
             proxy.Apply(handler, "*");   // bypass decided per-request by ProxyConfig.IsBypassed
         return new HttpClient(new SafeRedirectHandler(handler)) { Timeout = Timeout.InfiniteTimeSpan };
     }

@@ -1,6 +1,6 @@
 # PROJECT-TREE — Nova Download Manager
-# version v1.7.1 · git 8ac1ecd · 2026-10-29T07:23:46
-# exact file-set carried by the Dropbox source checkpoint (298 files, 2,388,526 bytes uncompressed)
+# version v1.7.1 · git 90d10a7 · 2026-10-29T20:17:07
+# exact file-set carried by the Dropbox source checkpoint (301 files, 2,406,677 bytes uncompressed)
 # (regenerate: python3 scripts/gen_project_tree.py)
 
 .env
@@ -119,10 +119,13 @@ docs/
   VIDEO-DETECTION.md
   history/
     legacy-nova-tree/
+      KNOWN-LIMITATIONS-v0.1.0-parallel.md
       KNOWN-LIMITATIONS.md
+      README-v0.1.0-parallel.md
       README.md
       ROUND-12.md
       SESSIONS.md
+      WORKLOG-2026-10-30-parallel-v0.1.0.md
       WORKLOG.md
 extensions/
   build.mjs

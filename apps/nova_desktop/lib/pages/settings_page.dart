@@ -277,6 +277,55 @@ class SettingsPage extends ConsumerWidget {
           }),
         ]),
 
+        // ---- v1.8.0 (IDM "Downloads" tab parity): progress view + resume options ----
+        _section(context, Icons.download_for_offline_outlined, s.progressDialogMode, [
+          Builder(builder: (context) {
+            final mode = settings['ui.progress_dialog'] ?? 'minimized';
+            return SegmentedButton<String>(
+              segments: [
+                ButtonSegment(value: 'always', label: Text(s.progressDialogAlways)),
+                ButtonSegment(value: 'minimized', label: Text(s.progressDialogMinimized)),
+                ButtonSegment(value: 'never', label: Text(s.progressDialogNever)),
+              ],
+              selected: {mode},
+              onSelectionChanged: (sel) => engine?.call('set_settings', {
+                'values': {'ui.progress_dialog': sel.first}
+              }),
+            );
+          }),
+          const SizedBox(height: 4),
+          SwitchListTile(
+            value: settings['ui.remember_category_dir'] != 'false',
+            onChanged: (v) => engine?.call('set_settings', {
+              'values': {'ui.remember_category_dir': '$v'}
+            }),
+            title: Text(s.rememberCategoryDir, style: const TextStyle(fontSize: 13.5)),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+          SwitchListTile(
+            value: settings['engine.resume_ignore_validator_change'] == 'true',
+            onChanged: (v) => engine?.call('set_settings', {
+              'values': {'engine.resume_ignore_validator_change': '$v'}
+            }),
+            title: Text(s.ignoreValidatorChange, style: const TextStyle(fontSize: 13.5)),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+          SwitchListTile(
+            value: settings['engine.http2'] != 'false',
+            onChanged: (v) => engine?.call('set_settings', {
+              'values': {'engine.http2': '$v'}
+            }),
+            title: Text(s.http2, style: const TextStyle(fontSize: 13.5)),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+        ]),
+
+        // ---- v1.8.0 (IDM "Sounds" tab parity): per-event sounds ----------------
+        _SoundsSection(settings: settings, engine: engine),
+
         // ---- check for updates --------------------------------------------------
         _section(context, Icons.system_update_alt_rounded, s.updateNow, [
           Row(children: [
@@ -311,8 +360,9 @@ class SettingsPage extends ConsumerWidget {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text('${s.updatedCheck} (update.url)',
-                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              // v1.8.0 (IDM weekly quick-update parity): auto-check interval.
+              child: _settingField(context, engine, s.updateAutoCheck, 'update.auto_check_hours',
+                  settings['update.auto_check_hours'] ?? '168'),
             ),
           ]),
         ]),
@@ -491,10 +541,14 @@ class _ProxySectionState extends State<_ProxySection> {
   late final _user = TextEditingController(text: widget.settings['proxy.user'] ?? '');
   late final _pass = TextEditingController(text: widget.settings['proxy.pass'] ?? '');
   late final _bypass = TextEditingController(text: widget.settings['proxy.bypass'] ?? 'localhost');
+  // v1.8.0 (IDM Proxy tab parity): PAC mode + Get System
+  late bool _pacMode = widget.settings['proxy.mode'] == 'pac';
+  late final _pacUrl = TextEditingController(text: widget.settings['proxy.pac_url'] ?? '');
+  bool _busy = false;
 
   @override
   void dispose() {
-    for (final c in [_host, _port, _user, _pass, _bypass]) {
+    for (final c in [_host, _port, _user, _pass, _bypass, _pacUrl]) {
       c.dispose();
     }
     super.dispose();
@@ -504,14 +558,74 @@ class _ProxySectionState extends State<_ProxySection> {
     widget.engine?.call('set_settings', {
       'values': {
         'proxy.enabled': 'true',
+        'proxy.mode': _pacMode ? 'pac' : 'manual',
         'proxy.scheme': _scheme,
         'proxy.host': _host.text.trim(),
         'proxy.port': _port.text.trim(),
         'proxy.user': _user.text.trim(),
         'proxy.pass': _pass.text,
         'proxy.bypass': _bypass.text.trim(),
+        'proxy.pac_url': _pacUrl.text.trim(),
       }
     });
+  }
+
+  Future<void> _detectSystem() async {
+    setState(() => _busy = true);
+    try {
+      final resp = await widget.engine?.call('detect_system_proxy');
+      if (!mounted || resp == null) return;
+      if (resp['available'] != true) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(S.of(context).systemProxyNone)));
+        return;
+      }
+      setState(() {
+        if (resp['mode'] == 'pac' && resp['pac_url'] is String && (resp['pac_url'] as String).isNotEmpty) {
+          _pacMode = true;
+          _pacUrl.text = resp['pac_url'] as String;
+        } else {
+          _pacMode = false;
+          _scheme = (resp['scheme'] as String?) ?? 'http';
+          _host.text = (resp['host'] as String?) ?? '';
+          _port.text = '${resp['port'] ?? ''}';
+          if ((resp['bypass'] as String?)?.isNotEmpty == true) {
+            _bypass.text = resp['bypass'] as String;
+          }
+        }
+      });
+      _save();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _testPac() async {
+    final url = _pacUrl.text.trim();
+    if (url.isEmpty) return;
+    setState(() => _busy = true);
+    try {
+      final resp = await widget.engine?.call('test_pac', {
+        'url': url,
+        'test_url': 'https://www.example.com/file.zip',
+      });
+      if (!mounted || resp == null) return;
+      final result = resp['result'] as String? ?? '?';
+      final msg = result == 'DIRECT'
+          ? 'DIRECT'
+          : '$result → ${resp['host']}:${resp['port']}';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PAC: $msg')));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -539,37 +653,183 @@ class _ProxySectionState extends State<_ProxySection> {
                 ),
               ]),
               const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                initialValue: _scheme,
-                decoration: InputDecoration(labelText: s.proxyType, border: const OutlineInputBorder(), isDense: true),
-                items: const [
-                  DropdownMenuItem(value: 'http', child: Text('HTTP')),
-                  DropdownMenuItem(value: 'https', child: Text('HTTPS')),
-                  DropdownMenuItem(value: 'socks4', child: Text('SOCKS4')),
-                  DropdownMenuItem(value: 'socks4a', child: Text('SOCKS4a')),
-                  DropdownMenuItem(value: 'socks5', child: Text('SOCKS5')),
+              // v1.8.0: manual | PAC (IDM "automatic configuration script")
+              SegmentedButton<bool>(
+                segments: [
+                  ButtonSegment(value: false, label: Text(s.proxyManual)),
+                  ButtonSegment(value: true, label: Text(s.proxyPac)),
                 ],
-                onChanged: (v) => setState(() => _scheme = v ?? 'http'),
+                selected: {_pacMode},
+                onSelectionChanged: (sel) => setState(() => _pacMode = sel.first),
               ),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(flex: 3, child: TextField(controller: _host, decoration: InputDecoration(labelText: s.proxyHost, border: const OutlineInputBorder(), isDense: true))),
-                const SizedBox(width: 8),
-                Expanded(flex: 1, child: TextField(controller: _port, decoration: InputDecoration(labelText: s.proxyPort, border: const OutlineInputBorder(), isDense: true))),
-              ]),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(child: TextField(controller: _user, decoration: InputDecoration(labelText: s.proxyUser, border: const OutlineInputBorder(), isDense: true))),
-                const SizedBox(width: 8),
-                Expanded(child: TextField(controller: _pass, obscureText: true, decoration: InputDecoration(labelText: s.proxyPassword, border: const OutlineInputBorder(), isDense: true))),
-              ]),
-              const SizedBox(height: 8),
-              TextField(controller: _bypass, decoration: InputDecoration(labelText: s.proxyBypass, border: const OutlineInputBorder(), isDense: true)),
+              if (_pacMode) ...[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _pacUrl,
+                  decoration: InputDecoration(
+                      labelText: s.pacUrlLabel, border: const OutlineInputBorder(), isDense: true),
+                ),
+                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.bug_report_outlined, size: 16),
+                    label: Text(s.pacTest),
+                    onPressed: _busy ? null : _testPac,
+                  ),
+                ]),
+              ] else ...[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: _scheme,
+                  decoration: InputDecoration(labelText: s.proxyType, border: const OutlineInputBorder(), isDense: true),
+                  items: const [
+                    DropdownMenuItem(value: 'http', child: Text('HTTP')),
+                    DropdownMenuItem(value: 'https', child: Text('HTTPS')),
+                    DropdownMenuItem(value: 'socks4', child: Text('SOCKS4')),
+                    DropdownMenuItem(value: 'socks4a', child: Text('SOCKS4a')),
+                    DropdownMenuItem(value: 'socks5', child: Text('SOCKS5')),
+                  ],
+                  onChanged: (v) => setState(() => _scheme = v ?? 'http'),
+                ),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(flex: 3, child: TextField(controller: _host, decoration: InputDecoration(labelText: s.proxyHost, border: const OutlineInputBorder(), isDense: true))),
+                  const SizedBox(width: 8),
+                  Expanded(flex: 1, child: TextField(controller: _port, decoration: InputDecoration(labelText: s.proxyPort, border: const OutlineInputBorder(), isDense: true))),
+                ]),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(child: TextField(controller: _user, decoration: InputDecoration(labelText: s.proxyUser, border: const OutlineInputBorder(), isDense: true))),
+                  const SizedBox(width: 8),
+                  Expanded(child: TextField(controller: _pass, obscureText: true, decoration: InputDecoration(labelText: s.proxyPassword, border: const OutlineInputBorder(), isDense: true))),
+                ]),
+                const SizedBox(height: 8),
+                TextField(controller: _bypass, decoration: InputDecoration(labelText: s.proxyBypass, border: const OutlineInputBorder(), isDense: true)),
+              ],
               const SizedBox(height: 10),
-              Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: FilledButton(onPressed: _save, child: Text(s.save)),
-              ),
+              Row(children: [
+                // IDM "Get System" button parity
+                OutlinedButton.icon(
+                  icon: _busy
+                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.desktop_windows_outlined, size: 16),
+                  label: Text(s.getSystemProxy),
+                  onPressed: _busy ? null : _detectSystem,
+                ),
+                const Spacer(),
+                FilledButton(onPressed: _save, child: Text(s.save)),
+              ]),
+              const SizedBox(height: 6),
+              Text(s.proxyRestartNote,
+                  style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// v1.8.0 (IDM "Sounds" tab parity): per-event sound files with a Test button.
+class _SoundsSection extends StatefulWidget {
+  const _SoundsSection({required this.settings, required this.engine});
+  final Map<String, String> settings;
+  final dynamic engine;
+
+  @override
+  State<_SoundsSection> createState() => _SoundsSectionState();
+}
+
+class _SoundsSectionState extends State<_SoundsSection> {
+  final _files = <String, TextEditingController>{};
+
+  @override
+  void dispose() {
+    for (final c in _files.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  TextEditingController _ctrl(String event) =>
+      _files.putIfAbsent(event, () => TextEditingController(text: widget.settings['sounds.file.$event'] ?? ''));
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.of(context);
+    final engine = widget.engine;
+    final enabled = (widget.settings['sounds.events'] ?? 'complete')
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    final events = <(String, String, IconData)>[
+      ('complete', s.soundEventComplete, Icons.task_alt_outlined),
+      ('error', s.soundEventError, Icons.error_outline),
+      ('added', s.soundEventAdded, Icons.add_circle_outline),
+      ('all_done', s.soundEventAllDone, Icons.done_all_outlined),
+    ];
+    void toggle(String event, bool on) {
+      final next = {...enabled};
+      on ? next.add(event) : next.remove(event);
+      final order = ['complete', 'error', 'added', 'all_done'];
+      engine?.call('set_settings', {
+        'values': {'sounds.events': order.where(next.contains).join(',')}
+      });
+      setState(() {});
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(Icons.music_note_outlined, size: 18, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 10),
+                Text(s.soundsEvents, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+              ]),
+              const SizedBox(height: 6),
+              for (final (event, label, icon) in events)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(children: [
+                    SizedBox(
+                      width: 210,
+                      child: CheckboxListTile(
+                        value: enabled.contains(event),
+                        onChanged: (v) => toggle(event, v ?? false),
+                        title: Text(label, style: const TextStyle(fontSize: 13)),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _ctrl(event),
+                        decoration: InputDecoration(
+                          labelText: s.soundFileLabel,
+                          border: const OutlineInputBorder(),
+                          isDense: true,
+                          prefixIcon: Icon(icon, size: 16),
+                        ),
+                        onSubmitted: (v) => engine?.call('set_settings', {
+                          'values': {'sounds.file.$event': v.trim()}
+                        }),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: s.soundTest,
+                      icon: const Icon(Icons.volume_up_outlined, size: 18),
+                      onPressed: () => SoundPlayer.play(_ctrl(event).text.trim()),
+                    ),
+                  ]),
+                ),
             ],
           ),
         ),

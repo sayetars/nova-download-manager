@@ -156,6 +156,23 @@ public sealed class DeleteCategoryRequest
     public string Name { get; set; } = string.Empty;
 }
 
+/// <summary>v1.8.0 (IDM "Change folder for category on last selected" parity): persist a new default dir for a category.</summary>
+public sealed class UpdateCategoryDirRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string Dir { get; set; } = string.Empty;
+}
+
+/// <summary>v1.8.0 (IDM Proxy tab "Get System" parity): result of OS proxy detection.</summary>
+public sealed class DetectSystemProxyRequest { }
+
+/// <summary>v1.8.0: load a PAC script and resolve one test URL against it.</summary>
+public sealed class TestPacRequest
+{
+    public string Url { get; set; } = string.Empty;
+    public string TestUrl { get; set; } = string.Empty;
+}
+
 /// <summary>Import/export the task list (IDM parity).</summary>
 public sealed class ImportTasksRequest
 {

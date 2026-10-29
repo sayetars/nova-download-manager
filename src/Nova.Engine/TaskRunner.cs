@@ -36,6 +36,7 @@ public sealed class TaskRunner
     private readonly ServerProfileService? _profiles;
     private readonly Security.PgpKeyringService? _pgpKeys;
     private readonly YtDlp.YtDlpBridge? _ytdlp;
+    private readonly Action<string, string>? _rememberCategoryDir;
     private long _lastLivePublishMs;
 
     public TaskRunner(HttpClient http, HttpProber prober, IDownloadTaskRepository tasks,
@@ -49,7 +50,8 @@ public sealed class TaskRunner
         Func<string, string?>? settings = null,
         ServerProfileService? profiles = null,
         Security.PgpKeyringService? pgpKeys = null,
-        YtDlp.YtDlpBridge? ytdlp = null)
+        YtDlp.YtDlpBridge? ytdlp = null,
+        Action<string, string>? rememberCategoryDir = null)
     {
         _http = http;
         _prober = prober;
@@ -71,6 +73,7 @@ public sealed class TaskRunner
         _profiles = profiles;
         _pgpKeys = pgpKeys;
         _ytdlp = ytdlp;
+        _rememberCategoryDir = rememberCategoryDir;
     }
 
     public SpeedMeter Speed { get; } = new();
@@ -160,6 +163,7 @@ public sealed class TaskRunner
             _profiles?.RecordResult(task.EffectiveUrl ?? task.Url, true);
 
             bool validatorChanged = false;
+            var oldTotalBytes = task.TotalBytes; // captured before probe overwrites it
             if (task.ReceivedBytes > 0)
             {
                 if (!string.IsNullOrEmpty(probe.Etag) && !string.IsNullOrEmpty(task.Etag))
@@ -167,6 +171,11 @@ public sealed class TaskRunner
                 else if (!string.IsNullOrEmpty(probe.LastModified) && !string.IsNullOrEmpty(task.LastModified))
                     validatorChanged = !string.Equals(task.LastModified, probe.LastModified, StringComparison.OrdinalIgnoreCase);
             }
+
+            // v1.8.0 (IDM "Downloads" tab parity): "Ignore file modification time changes
+            // when resuming" — when the validator changed but size and plan still match,
+            // resume the old bytes instead of restarting.
+            var ignoreValidatorChange = Setting("engine.resume_ignore_validator_change") == "true";
 
             var oldReceived = task.ReceivedBytes;
             task.EffectiveUrl = probe.FinalUrl;
@@ -178,6 +187,15 @@ public sealed class TaskRunner
                 task.FileName = probe.SuggestedFileName ?? FilenamePolicy.FromUrl(probe.FinalUrl) ?? "download";
             if (string.IsNullOrEmpty(task.Category) || task.Category == "other")
                 task.Category = Disk.GuessCategory(task.FileName, probe.ContentType);
+
+            // v1.8.0 (IDM "Save To" tab parity): "change folder for … category on last
+            // selected" — a task saved to a custom dir becomes the category's new default.
+            if (_rememberCategoryDir is not null && !string.IsNullOrEmpty(task.DestinationDir)
+                && Setting("ui.remember_category_dir") != "false")
+            {
+                try { _rememberCategoryDir(task.Category, task.DestinationDir); }
+                catch { /* remembering must never break a download */ }
+            }
 
             // ---- v1.3.0: Metalink (XML + RFC 6249) + checksum sidecars --------
             if (task.Kind == DownloadKind.File)
@@ -238,16 +256,31 @@ public sealed class TaskRunner
 
             // ---- plan (build fresh or resume persisted) --------------------
             var segments = _segs.GetForTask(task.Id);
+            // v1.8.0 BUG FIX: the old check summed absolute (End + 1) values, which
+            // only equals the size for single-segment plans — every multi-segment
+            // resume was misjudged as "plan mismatch" and silently restarted from
+            // zero (correct final bytes, wasted re-download). Correct check: the
+            // persisted slices must cover [0, size) exactly (sum of LENGTHS == size,
+            // starting at 0, ending at size-1 — contiguity is guaranteed by plan
+            // construction and dynamic split).
             var planMatches = segments.Count > 0 && probe.ContentLength >= 0
-                              && segments.Sum(s => s.End + 1) == probe.ContentLength;
+                              && segments.Sum(s => s.Length) == probe.ContentLength
+                              && segments.Min(s => s.Start) == 0
+                              && segments.Max(s => s.End) == probe.ContentLength - 1;
 
-            if (oldReceived > 0 && (validatorChanged || !planMatches))
+            var validatorOnlyChange = validatorChanged && planMatches
+                                      && (probe.ContentLength < 0 || probe.ContentLength == oldTotalBytes);
+            if (oldReceived > 0 && ((validatorChanged && !(ignoreValidatorChange && validatorOnlyChange)) || !planMatches))
             {
                 task.ReceivedBytes = 0;
                 _segs.DeleteForTask(task.Id);
                 segments = new List<DownloadSegment>();
                 _events.Emit(task, DownloadState.Interrupted,
                     validatorChanged ? "The server file changed; restarting the download." : "Download restarted.");
+            }
+            else if (validatorChanged && ignoreValidatorChange && validatorOnlyChange)
+            {
+                EngineLog.Info($"task {task.TaskKey}: validator changed but size matches; resuming old bytes (engine.resume_ignore_validator_change)");
             }
             else if (segments.Count == 0)
             {
@@ -296,6 +329,28 @@ public sealed class TaskRunner
                 .ToArray();
 
             var lastPersist = Environment.TickCount64;
+            // v1.8.0 BUG FIX (real resume): persist per-segment Received progress on
+            // the 1 Hz flush + on exit. Before this, segment progress lived only in
+            // memory: pause/crash/resume restarted every slice from its Start (the
+            // task-level counter kept the old number, hiding the re-download). Keyed
+            // by segment Index — ReplaceSegments reassigns row ids on dynamic split.
+            var lastSavedRx = new Dictionary<int, long>();
+            void FlushSegmentProgress()
+            {
+                List<DownloadSegment> snapshot;
+                lock (workLock) snapshot = pool.ToList();
+                foreach (var s in snapshot)
+                {
+                    if (s.Id <= 0) continue;
+                    if (lastSavedRx.TryGetValue(s.Index, out var last) && last == s.Received) continue;
+                    try
+                    {
+                        _segs.UpdateProgress(s.Id, s.Received);
+                        lastSavedRx[s.Index] = s.Received;
+                    }
+                    catch { /* retried on the next flush */ }
+                }
+            }
             using var progressTimer = new System.Timers.Timer(750);
             progressTimer.Elapsed += (_, _) =>
             {
@@ -304,6 +359,7 @@ public sealed class TaskRunner
                 lastPersist = now;
                 task.ReceivedBytes = Interlocked.Read(ref _runReceived);
                 _persistProgress(task);
+                FlushSegmentProgress();
                 _events.Progress(task, Speed.SpeedBps);
             };
             progressTimer.Start();
@@ -317,6 +373,7 @@ public sealed class TaskRunner
                 progressTimer.Dispose();
                 task.ReceivedBytes = Interlocked.Read(ref _runReceived);
                 _persistProgress(task);
+                FlushSegmentProgress(); // v1.8.0: persist slice positions on pause/crash/exit too
             }
 
             if (ct.IsCancellationRequested)
@@ -638,6 +695,7 @@ public sealed class TaskRunner
     /// <summary>Cookies + per-task extra headers on every task HTTP request (v1.3.0).</summary>
     internal static void ApplyTaskHeaders(HttpRequestMessage req, DownloadTask task)
     {
+        HttpProtocol.Apply(req); // v1.8.0: offer HTTP/2 on https (choke point for task requests)
         if (!string.IsNullOrWhiteSpace(task.Cookies))
             req.Headers.TryAddWithoutValidation("Cookie", task.Cookies.Trim());
         if (!string.IsNullOrWhiteSpace(task.ExtraHeaders))

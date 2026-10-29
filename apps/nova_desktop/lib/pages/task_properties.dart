@@ -27,6 +27,7 @@ class _TaskPropertiesDialogState extends ConsumerState<_TaskPropertiesDialog> {
   late final TextEditingController _speedCap;
   late final TextEditingController _mirrors;
   late final TextEditingController _startAt;
+  late final TextEditingController _dir; // v1.8.0: Save As (IDM Properties parity)
   late String _queue;
   late String _category;
   late int _priority;
@@ -43,6 +44,7 @@ class _TaskPropertiesDialogState extends ConsumerState<_TaskPropertiesDialog> {
     _speedCap = TextEditingController(text: '');
     _mirrors = TextEditingController(text: '');
     _startAt = TextEditingController(text: '');
+    _dir = TextEditingController(text: t.destinationDir);
     _queue = t.queueName;
     _category = t.category;
     _priority = t.priority.clamp(0, 2);
@@ -78,6 +80,7 @@ class _TaskPropertiesDialogState extends ConsumerState<_TaskPropertiesDialog> {
     _speedCap.dispose();
     _mirrors.dispose();
     _startAt.dispose();
+    _dir.dispose();
     super.dispose();
   }
 
@@ -113,6 +116,15 @@ class _TaskPropertiesDialogState extends ConsumerState<_TaskPropertiesDialog> {
           postAction: _postAction == 'none' ? '' : _postAction,
           mirrors: mirrors,
           startAtMs: startAtMs);
+      // v1.8.0: Save As — move a non-running task to another directory.
+      final newDir = _dir.text.trim();
+      if (newDir.isNotEmpty && newDir != widget.task.destinationDir) {
+        final engine = ref.read(prov.engineProvider);
+        await engine?.call('set_destination', {
+          'task_key': widget.task.taskKey,
+          'destination_dir': newDir,
+        });
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -179,6 +191,11 @@ class _TaskPropertiesDialogState extends ConsumerState<_TaskPropertiesDialog> {
                 }.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
                 onChanged: (v) => setState(() => _category = v ?? 'other'),
                 decoration: _deco(s.category),
+              )),
+              const SizedBox(height: 12),
+              _field(s.saveTo, TextField(
+                controller: _dir,
+                decoration: _deco(s.saveTo, icon: Icons.folder_outlined),
               )),
               const SizedBox(height: 12),
               _field(s.priority, DropdownButtonFormField<int>(

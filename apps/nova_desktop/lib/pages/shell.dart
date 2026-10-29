@@ -6,8 +6,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models.dart';
+import '../core/sound_player.dart';
 import '../core/strings.dart';
 import '../core/theme.dart';
+import '../core/tray.dart';
 import '../providers/engine.dart' as prov;
 import 'browser_page.dart';
 import 'downloads_page.dart';
@@ -45,17 +47,21 @@ class ShellPage extends ConsumerStatefulWidget {
   ConsumerState<ShellPage> createState() => _ShellPageState();
 }
 
-class _ShellPageState extends ConsumerState<ShellPage> {
+class _ShellPageState extends ConsumerState<ShellPage> with WidgetsBindingObserver {
   NavSection _section = NavSection.overview;
   bool _expanded = true;
   String _search = '';
   Timer? _clipboardTimer;
   String? _lastClip;
+  Timer? _updateCheckTimer;
+  DateTime? _lastUpdateCheck;
+  bool _updateNotified = false;
   static const _dndChannel = MethodChannel('nova/dnd');
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // v1.8.0: tray close-to-tray + exit requests
     // refresh task list once engine connects (provider handles it) + keyboard shortcuts
     HardwareKeyboard.instance.addHandler(_onKey);
     // IDM parity: clipboard URL monitor — prefills the Add dialog (never silent).
@@ -71,15 +77,93 @@ class _ShellPageState extends ConsumerState<ShellPage> {
       }
       return null;
     });
-    // IDM parity: completion → dialog + sound.
+    // v1.8.0 (IDM tray parity): Windows tray icon + menu events.
+    NovaTray.init().then((ok) {
+      if (ok && mounted) {
+        NovaTray.setHandlers(
+          onShow: () => NovaTray.show(),
+          onExit: () => SystemNavigator.pop(), // real exit from the tray menu
+        );
+      }
+    });
+    // v1.8.0 (IDM weekly quick-update parity): periodic check_update.
+    _updateCheckTimer = Timer.periodic(const Duration(minutes: 30), (_) => _autoUpdateCheck());
+    // IDM parity: task events → completion dialog + per-event sounds (v1.8.0).
     ref.listenManual(prov.tasksProvider, (prev, next) {
-      final oldIds = prev?.value?.where((t) => t.state == 'completed').map((t) => t.taskKey).toSet() ?? const <String>{};
+      final old = prev?.value;
       next.whenData((list) {
+        final oldCompleted = old?.where((t) => t.state == 'completed').map((t) => t.taskKey).toSet() ?? const <String>{};
+        final oldFailed = old?.where((t) => t.state == 'failed').map((t) => t.taskKey).toSet() ?? const <String>{};
+        final oldDownloading = old?.where((t) => t.state == 'downloading').map((t) => t.taskKey).toSet() ?? const <String>{};
+        final oldRunning = old?.where((t) => t.isRunning).length ?? 0;
+        var completedNow = 0;
+        var runningNow = 0;
         for (final t in list) {
-          if (t.state == 'completed' && !oldIds.contains(t.taskKey)) _onTaskCompleted(t);
+          if (t.state == 'completed' && !oldCompleted.contains(t.taskKey)) {
+            completedNow++;
+            _onTaskCompleted(t);
+          }
+          if (t.state == 'failed' && !oldFailed.contains(t.taskKey)) {
+            _playEventSound('error');
+          }
+          if (t.state == 'downloading' && !oldDownloading.contains(t.taskKey)) {
+            _onTaskStarted(t); // IDM "Downloads" tab: progress view on start
+          }
+          if (t.isRunning) runningNow++;
+        }
+        // "all downloads finished": running → 0 after at least one completion
+        if (oldRunning > 0 && runningNow == 0 && completedNow > 0) {
+          _playEventSound('all_done');
         }
       });
     });
+  }
+
+  /// v1.8.0 (IDM weekly quick-update parity): honours update.auto_check_hours.
+  void _autoUpdateCheck() {
+    final settings = ref.read(prov.settingsProvider);
+    final hours = int.tryParse(settings['update.auto_check_hours'] ?? '168') ?? 0;
+    if (hours <= 0) return; // disabled
+    final now = DateTime.now();
+    if (_lastUpdateCheck != null &&
+        now.difference(_lastUpdateCheck!).inHours < hours) {
+      return;
+    }
+    _lastUpdateCheck = now;
+    final engine = ref.read(prov.engineProvider);
+    if (engine == null) return;
+    engine.call('check_update').then((resp) {
+      if (!mounted || _updateNotified) return;
+      if (resp != null && resp['update_available'] == true) {
+        _updateNotified = true;
+        final latest = resp['latest_version'] as String? ?? '?';
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${S.of(context).updateAvailableMsg}: v$latest')));
+      }
+    }).catchError((_) {});
+  }
+
+  /// IDM "Downloads" tab parity (v1.8.0): progress view on download start.
+  void _onTaskStarted(TaskUi t) {
+    if (!mounted) return;
+    final mode = ref.read(prov.settingsProvider)['ui.progress_dialog'] ?? 'minimized';
+    if (mode == 'never') return;
+    if (mode == 'always') {
+      showTaskDetails(context, t);
+    } else {
+      setState(() => _section = NavSection.active); // "stay in list"
+    }
+  }
+
+  // v1.8.0 (IDM tray parity): intercept the window close button.
+  @override
+  Future<AppExitRequest> didRequestAppExit() async {
+    final minimize = ref.read(prov.settingsProvider)['ui.minimize_to_tray'] == 'true';
+    if (minimize) {
+      final hidden = await NovaTray.hide();
+      if (hidden) return AppExitResponse.cancel; // stay in tray
+    }
+    return AppExitResponse.exit;
   }
 
   void _checkClipboard() async {
@@ -124,9 +208,9 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     if (!mounted) return;
     // IDM parity v1.2.0 — completion-dialog customization: always | media | never.
     final mode = ref.read(prov.settingsProvider)['ui.complete_dialog'] ?? 'always';
+    _playEventSound('complete');
     if (mode == 'never') return;
     if (mode == 'media' && t.kind == 'file') return;
-    _playDoneSound();
     final s = S.of(context);
     showDialog(
       context: context,
@@ -147,21 +231,23 @@ class _ShellPageState extends ConsumerState<ShellPage> {
     );
   }
 
-  void _playDoneSound() {
-    try {
-      if (Platform.isWindows) {
-        Process.run('powershell', ['-c', '[console]::beep(880,180)']);
-      } else if (Platform.isLinux) {
-        Process.run('paplay', ['/usr/share/sounds/freedesktop/stereo/complete.oga']);
-      } else if (Platform.isMacOS) {
-        Process.run('afplay', ['/System/Library/Sounds/Glass.aiff']);
-      }
-    } catch (_) {/* sounds are best effort */}
+  /// v1.8.0 (IDM "Sounds" tab parity): per-event sounds with optional custom files.
+  void _playEventSound(String event) {
+    final settings = ref.read(prov.settingsProvider);
+    final enabled = (settings['sounds.events'] ?? 'complete')
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    if (!enabled.contains(event)) return;
+    SoundPlayer.play(settings['sounds.file.$event']);
   }
 
   @override
   void dispose() {
     _clipboardTimer?.cancel();
+    _updateCheckTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_onKey);
     super.dispose();
   }

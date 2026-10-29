@@ -476,6 +476,7 @@ Future<void> showAddDownloadDialog(BuildContext context,
       : (prefillUrl ?? '');
   final urlCtrl = TextEditingController(text: initialText);
   final fileCtrl = TextEditingController();
+  final dirCtrl = TextEditingController(); // v1.8.0: Save As (IDM Download File Info parity)
   final mirrorsCtrl = TextEditingController();
   final startAtCtrl = TextEditingController();
   final cookiesCtrl = TextEditingController();
@@ -713,6 +714,17 @@ Future<void> showAddDownloadDialog(BuildContext context,
                   decoration: InputDecoration(labelText: '${s.fileName} (${s.none})'),
                 ),
                 const SizedBox(height: 12),
+                // v1.8.0 (IDM "Download File Info" parity): Save As directory — empty
+                // keeps the category default; a custom dir becomes the category's new
+                // default when "change folder on last selected" is on (engine-side).
+                TextField(
+                  controller: dirCtrl,
+                  decoration: InputDecoration(
+                    labelText: s.saveTo,
+                    prefixIcon: const Icon(Icons.folder_outlined, size: 18),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Text(s.connections, style: Theme.of(context).textTheme.labelLarge),
@@ -858,13 +870,14 @@ Future<void> showAddDownloadDialog(BuildContext context,
     ),
   ).then((ok) async {
     try {
-      await _handleAddOk(ok, context, urlCtrl, fileCtrl, mirrorsCtrl, startAtCtrl,
+      await _handleAddOk(ok, context, urlCtrl, fileCtrl, dirCtrl, mirrorsCtrl, startAtCtrl,
           cookiesCtrl, headersCtrl, hashCtrl, connections, downloadLater,
           sequential, seedAfter, superSeed, torrentPreview, deselectedFiles,
           ytdlpInfo, ytdlpFormatId, ytdlpNativeMode);
     } finally {
       urlCtrl.dispose();
       fileCtrl.dispose();
+      dirCtrl.dispose();
       mirrorsCtrl.dispose();
       startAtCtrl.dispose();
       cookiesCtrl.dispose();
@@ -888,6 +901,7 @@ Future<void> _handleAddOk(
     BuildContext context,
     TextEditingController urlCtrl,
     TextEditingController fileCtrl,
+    TextEditingController dirCtrl, // v1.8.0: Save As directory
     TextEditingController mirrorsCtrl,
     TextEditingController startAtCtrl,
     TextEditingController cookiesCtrl,
@@ -904,6 +918,7 @@ Future<void> _handleAddOk(
     String? ytdlpFormatId,
     bool ytdlpNativeMode) async {   // v1.6.0: merge-only → yt-dlp native download
     if (ok == true && context.mounted) {
+      final saveDir = dirCtrl.text.trim();
       final notifier = ProviderScope.containerOf(context, listen: false)
           .read(prov.tasksProvider.notifier);
       var urls = urlCtrl.text
@@ -923,7 +938,7 @@ Future<void> _handleAddOk(
             url: urls.first,
             formatId: ytdlpFormatId!,
             fileName: fileCtrl.text.trim().isEmpty ? null : fileCtrl.text.trim(),
-            destinationDir: null,
+            destinationDir: saveDir.isEmpty ? null : saveDir,
             native: ytdlpNativeMode,   // v1.6.0: merge-only formats → yt-dlp downloads
             title: ytdlpInfo?['title'] as String?,
             ext: _extOf(ytdlpInfo, ytdlpFormatId),
@@ -973,6 +988,7 @@ Future<void> _handleAddOk(
         await notifier.addDownload(
           url: valid.first,
           fileName: fileCtrl.text.trim().isEmpty ? null : fileCtrl.text.trim(),
+          destinationDir: saveDir.isEmpty ? null : saveDir,
           maxConnections: connections,
           mirrors: mirrors,
           startAtMs: startAtMs,

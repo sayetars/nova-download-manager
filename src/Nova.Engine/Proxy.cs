@@ -6,7 +6,8 @@ namespace Nova.Engine;
 /// Proxy configuration parsed from settings keys (IDM parity):
 ///   proxy.enabled, proxy.scheme (http|https|socks4|socks4a|socks5),
 ///   proxy.host, proxy.port, proxy.user, proxy.pass,
-///   proxy.bypass (";"-separated host wildcards), proxy.for_ftp
+///   proxy.bypass (";"-separated host wildcards), proxy.for_ftp,
+///   proxy.mode ("manual" (default) | "pac"), proxy.pac_url (v1.8.0).
 /// .NET 8 SocketsHttpHandler supports HTTP(S) and SOCKS4/4a/5 schemes natively.
 /// </summary>
 public sealed record ProxyConfig
@@ -19,6 +20,11 @@ public sealed record ProxyConfig
     public string? Password { get; init; }
     public string[] Bypass { get; init; } = [];
     public bool ForFtp { get; init; } = true;
+    /// <summary>v1.8.0: "pac" → resolve per-URL via the PAC script at <see cref="PacUrl"/>.</summary>
+    public string Mode { get; init; } = "manual";
+    public string? PacUrl { get; init; }
+
+    public bool UsesPac => Enabled && Mode == "pac" && !string.IsNullOrWhiteSpace(PacUrl);
 
     public static ProxyConfig FromSettings(Func<string, string?> get)
     {
@@ -35,6 +41,8 @@ public sealed record ProxyConfig
             Bypass = (get("proxy.bypass") ?? "")
                 .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
             ForFtp = get("proxy.for_ftp") != "false",
+            Mode = string.Equals(get("proxy.mode"), "pac", StringComparison.OrdinalIgnoreCase) ? "pac" : "manual",
+            PacUrl = get("proxy.pac_url"),
         };
     }
 

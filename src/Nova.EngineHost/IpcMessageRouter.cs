@@ -408,6 +408,8 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                     if (req.Values.TryGetValue("scheduler.max_concurrent", out var mc) &&
                         int.TryParse(mc, out var mcVal) && mcVal > 0)
                         _settings.Set("scheduler.max_concurrent", mcVal.ToString());
+                    if (req.Values.TryGetValue("engine.http2", out var h2)) // v1.8.0 (IDM 6.43 parity), live toggle
+                        HttpProtocol.UseHttp2 = h2 != "false";
                     return Envelope.Ok(id);
                 }
 
@@ -635,6 +637,50 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                     var req = env.PayloadAs<DeleteCategoryRequest>() ?? new();
                     DeleteCategoryDef(req.Name);
                     return Envelope.Ok(id);
+                }
+
+                // v1.8.0: IDM "Save To" tab — "Change folder for … category on last selected"
+                case "update_category_dir":
+                {
+                    var req = env.PayloadAs<UpdateCategoryDirRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.Name))
+                        return Envelope.Error(id, "bad_request", "protocol", "name required.");
+                    var updated = UpdateCategoryDir(req.Name, req.Dir ?? "");
+                    return Envelope.Ok(id, new { updated });
+                }
+
+                // v1.8.0: IDM Proxy tab — "Get System" button
+                case "detect_system_proxy":
+                {
+                    var sp = SystemProxy.Read();
+                    return Envelope.Ok(id, new
+                    {
+                        available = sp.Available, mode = sp.Mode, scheme = sp.Scheme,
+                        host = sp.Host, port = sp.Port, bypass = sp.Bypass,
+                        pac_url = sp.PacUrl, source = sp.Source,
+                    });
+                }
+
+                // v1.8.0: PAC script smoke test (Settings → Proxy → Test)
+                case "test_pac":
+                {
+                    var req = env.PayloadAs<TestPacRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.Url) || string.IsNullOrWhiteSpace(req.TestUrl))
+                        return Envelope.Error(id, "bad_request", "protocol", "url and test_url are required.");
+                    try
+                    {
+                        var script = await PacSource.LoadAsync(req.Url.Trim(), ct);
+                        var resolver = new PacResolver(script);
+                        var host = Uri.TryCreate(req.TestUrl.Trim(), UriKind.Absolute, out var u) ? u.Host : "";
+                        var decision = resolver.Resolve(req.TestUrl.Trim(), host);
+                        return Envelope.Ok(id, decision is null
+                            ? new { result = "DIRECT" }
+                            : new { result = decision.Mode, host = decision.Host, port = decision.Port });
+                    }
+                    catch (Exception ex)
+                    {
+                        return Envelope.Error(id, "pac_failed", "network", ex.Message);
+                    }
                 }
 
                 case "export_tasks":
@@ -1213,5 +1259,18 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
             cmd.ExecuteNonQuery();
             return null;
         });
+    }
+
+    /// <summary>v1.8.0: IDM "change folder for category on last selected" — persists the new default dir.</summary>
+    private int UpdateCategoryDir(string name, string dir)
+    {
+        lock (_db.Connection)
+        using (var cmd = _db.Connection.CreateCommand())
+        {
+            cmd.CommandText = "UPDATE category_def SET destination_dir=@d WHERE name=@n";
+            cmd.Parameters.AddValue("@d", dir);
+            cmd.Parameters.AddValue("@n", name.Trim().ToLowerInvariant());
+            return cmd.ExecuteNonQuery();
+        }
     }
 }

@@ -20,6 +20,9 @@ public sealed class DownloadEngine : IAsyncDisposable
     private readonly IMediaPipeline? _media;
     private readonly HttpClient _http;
     private readonly HttpProber _prober;
+    /// <summary>v1.8.0: category → default save dir lookup ("change folder on last selected").</summary>
+    private readonly Func<string, string?>? _categoryDefaultDir;
+    private readonly Action<string, string>? _rememberCategoryDir;
     private readonly string _defaultDir;
     private readonly int _defaultConnections;
     private readonly LoginVault? _vault;
@@ -60,7 +63,9 @@ public sealed class DownloadEngine : IAsyncDisposable
         QuotaTracker? quota = null,
         ServerProfileService? profiles = null,
         Security.PgpKeyringService? pgpKeys = null,
-        YtDlp.YtDlpBridge? ytdlp = null)
+        YtDlp.YtDlpBridge? ytdlp = null,
+        Func<string, string?>? categoryDefaultDir = null,
+        Action<string, string>? rememberCategoryDir = null)
     {
         _repo = repo;
         _segs = segs;
@@ -79,6 +84,8 @@ public sealed class DownloadEngine : IAsyncDisposable
         _pgpKeys = pgpKeys;
         _ytdlp = ytdlp ?? new YtDlp.YtDlpBridge(k => settings.Get(k));
         _prober = new HttpProber(http);
+        _categoryDefaultDir = categoryDefaultDir;
+        _rememberCategoryDir = rememberCategoryDir;
         UpdateGlobalRateCap(ParseLong(settings.Get("engine.global_speed_cap")));
         _events.Subscribe(new EngineSelfSink(this));
 
@@ -161,15 +168,19 @@ public sealed class DownloadEngine : IAsyncDisposable
             return Result<AddDownloadOutcome>.Success(new AddDownloadOutcome(dup.Task.TaskKey, dup.Task.Id, Duplicate: true));
 
         var kind = spec.Kind ?? DetectKind(spec.Url);
+        // v1.8.0 (IDM "Save To" tab parity): category default dir ("change folder for
+        // category on last selected") takes effect here — explicit task dir still wins.
+        var category = spec.Category ?? Disk.GuessCategory(spec.FileName ?? spec.Url, null);
         var task = new DownloadTask
         {
             TaskKey = Guid.NewGuid().ToString("N"),
             Kind = kind,
             Url = spec.Url,
             FileName = FilenamePolicy.SanitizeFileName(spec.FileName ?? FilenamePolicy.FromUrl(spec.Url) ?? "download"),
-            DestinationDir = Path.GetFullPath(spec.DestinationDir ?? _defaultDir),
+            DestinationDir = Path.GetFullPath(
+                spec.DestinationDir ?? _categoryDefaultDir?.Invoke(category) ?? _defaultDir),
             QueueName = spec.QueueName ?? "main",
-            Category = spec.Category ?? Disk.GuessCategory(spec.FileName ?? spec.Url, null),
+            Category = category,
             Referer = spec.Referer,
             ExpectedSha256 = spec.ExpectedSha256,
             MaxConnections = Math.Clamp(spec.MaxConnections ?? _defaultConnections, 1, 32),
@@ -417,7 +428,8 @@ public sealed class DownloadEngine : IAsyncDisposable
             n => Quota?.OnBytes(n),
             (t, plan) => _livePlans[t.TaskKey] = plan.Select(s => new SegmentView(s.Index, s.Start, s.End, s.Received)).ToArray(),
             k => _settings.Get(k),
-            _profiles, _pgpKeys, _ytdlp);
+            _profiles, _pgpKeys, _ytdlp,
+            _rememberCategoryDir);
 
         e.Runner = runner;
         _livePlans.TryRemove(e.Task.TaskKey, out _);
