@@ -10,7 +10,7 @@ export const NATIVE_HOST = 'com.nova.downloadmanager';
  * the minimum engine the extension needs. The options page compares it against
  * engine_status.engine_version and shows a red banner when the engine is older.
  */
-export const MIN_ENGINE_VERSION = '1.7.0';
+export const MIN_ENGINE_VERSION = '1.7.1';
 
 /** SemVer compare (major.minor.patch only); returns -1 | 0 | 1; 0 when unparseable. */
 export function cmpVersions(a: string, b: string): number {

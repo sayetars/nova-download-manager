@@ -3,7 +3,7 @@
 
 class BuildVersion {
   static const product = 'Nova Download Manager';
-  static const version = '1.7.0';
+  static const version = '1.7.1';
   static const channel = 'stable';
-  static const build = 7;
+  static const build = 8;
 }

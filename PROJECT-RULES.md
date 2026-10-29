@@ -14,6 +14,7 @@ Priority: UNIVERSAL-RULES.md > this file. Never weaken either silently.
 4. Path-traversal defense on every user/browser-supplied filename (FilenamePolicy + tar extraction filter).
 5. Never log secrets/tokens (engine token, refresh tokens) — redact in logs.
 6. Bilingual EN + FA (RTL + Persian digits) in UI strings; keep strings.dart the single authority.
+7. Free-forever (user directive 2026-10-29): NO part of the program may require payment — no paid tiers/keys/activation, no paid dependencies (free OSI licenses only, audited by scripts/free_audit.py in CI), no paid signing/build/distribution services (Trusted Signing rejected — D-013), no paywalled updates. Full policy: docs/FREE-FOREVER.md.
 
 ## Versioning & history
 - Semantic versioning; CHANGELOG.md is the human log; VERSIONS.md is the machine floor.

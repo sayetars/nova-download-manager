@@ -46,7 +46,7 @@ next:
    status` version block, extension About banner; push to GitHub → windows-build.yml for
    the full installer (audit gate runs first).
 2. Windows/extension feedback → v1.7.1 PATCH lane (edit version.json → sync → test → tag).
-3. Future: Trusted Signing adoption, tray, embedded player, store publishing.
+3. Future: tray, embedded player, store publishing (Trusted Signing REJECTED — free-forever policy D-013).
 
 evidence:
 - dotnet test Nova.sln → 242/242; flutter analyze → 0 errors; flutter test → 13 pass.

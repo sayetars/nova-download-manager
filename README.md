@@ -2,6 +2,14 @@
 
 A professional Windows 11 download manager: **Flutter** desktop UI, **C#/.NET 8** download engine, and smart **Chrome / Brave / Firefox** extensions with an on-player download button and a verified quality picker.
 
+## 100% free — every feature, forever
+
+**No part of Nova requires payment: no paid tiers, no license keys, no activation,
+no paid dependencies, no paid signing/distribution services, no paywalled updates.**
+Binary integrity is guaranteed by published SHA-256 hashes instead of paid
+certificates. Full policy (English + فارسی): [docs/FREE-FOREVER.md](docs/FREE-FOREVER.md) ·
+dependency audit: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
 ```
 Flutter UI ──Named Pipes──▶ Nova Engine (C#) ──HTTP/HTTPS──▶ Real files
 Browser ──▶ Native Messaging ──▶ Nova Engine ──▶ Real download

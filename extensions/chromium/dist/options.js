@@ -6,7 +6,7 @@ const $ = (id) => document.getElementById(id);
 
 // ---- v1.7.0 version-integrity About section (EN/FA) ---------------------------
 
-const MIN_ENGINE_VERSION = '1.7.0'; // stamped from version.json by scripts/sync_versions.py
+const MIN_ENGINE_VERSION = '1.7.1'; // stamped from version.json by scripts/sync_versions.py
 
 const I18N = {
   en: {
@@ -16,6 +16,7 @@ const I18N = {
     requiredEngine: 'Required engine',
     protocolVersion: 'IPC protocol',
     aboutNote: 'Versions come from the engine over native messaging. If the engine is older than the required version, update Nova Download Manager so extension and engine stay in lockstep.',
+    freeNote: 'Nova is 100% free — every feature, no payment, ever.',
     okBanner: 'Engine connected and up to date — extension and engine are in lockstep.',
     oldBanner: 'Engine is outdated: update Nova Download Manager (engine %s, required %s) so versions do not get mixed.',
     offBanner: 'Engine not running. Start Nova Download Manager, then reopen this page.',
@@ -27,6 +28,7 @@ const I18N = {
     requiredEngine: 'حداقل موتور لازم',
     protocolVersion: 'نسخهٔ پروتکل',
     aboutNote: 'نسخه‌ها از موتور و از مسیر پیام‌رسانی بومی دریافت می‌شوند. اگر موتور قدیمی‌تر از نسخهٔ لازم باشد، نوا دانلود منیجر را به‌روزرسانی کنید تا نسخه‌ها با هم قاطی نشوند.',
+    freeNote: 'نوا ۱۰۰٪ رایگان است — همهٔ امکانات، بدون هیچ پرداختی، برای همیشه.',
     okBanner: 'موتور متصل و به‌روز است — افزونه و موتور هم‌نسخه هستند.',
     oldBanner: 'موتور قدیمی است: نوا دانلود منیجر را به‌روزرسانی کنید (موجود %s، لازم %s).',
     offBanner: 'موتور در حال اجرا نیست. نوا دانلود منیجر را اجرا کنید و این صفحه را دوباره باز کنید.',

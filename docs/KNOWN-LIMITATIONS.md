@@ -59,12 +59,14 @@ Chrome, Chromium, Brave, Edge, Firefox are unaffected. No workaround on our side
 the upstream issue.
 
 ## 37. Windows binaries are unsigned (SmartScreen shows "unknown publisher")
-Until an Azure Trusted Signing subscription is set up (~US$9.99/month; individual identity
-validation with a government ID + Microsoft Authenticator — see docs/VERSIONING.md §8 for
-the researched recipe), Windows will show SmartScreen warnings for `NovaDesktop.exe`,
-`NovaEngine.exe` and the installer. Everything still runs via "More info → Run anyway";
-the SHA256 of every artifact is published alongside it. The CI workflow is the natural
-place to add `signtool` once credentials exist — no code changes required.
+Paid signing services are **excluded by policy** (free-forever, docs/FREE-FOREVER.md;
+Azure Trusted Signing ≈$9.99/mo was researched and REJECTED — DECISIONS D-013,
+docs/VERSIONING.md §8). Windows therefore shows SmartScreen warnings for
+`NovaDesktop.exe`, `NovaEngine.exe` and the installer. Everything still runs via
+"More info → Run anyway", and the SHA-256 of every artifact is published alongside it
+(`*.sha256` sidecars) so anyone can verify integrity. A builder may optionally sign
+their own builds with a free self-signed certificate (recipe in docs/VERSIONING.md §8);
+that removes tampering questions for their own binaries but does not remove SmartScreen.
 
 ## 38. AES-128 HLS segments are decrypted in memory (bounded)
 Each encrypted HLS segment is held in memory before decryption, capped at 512 MiB per

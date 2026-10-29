@@ -31,6 +31,8 @@
   .version-banner.ok { background: #14532d; color: #bbf7d0; }
   .version-banner.warn { background: #7f1d1d; color: #fecaca; }
   .version-banner.off { background: #1e293b; color: #cbd5e1; border: 1px dashed #475569; }
+  .free-note { margin: 10px 0 0 0; font-weight: 600; color: #1a7f37; }
+  [dir="rtl"] .free-note { color: #1a7f37; }
 </style>
 </head>
 <body>
@@ -101,6 +103,7 @@
     <div><span data-i18n="protocolVersion">IPC protocol</span><strong id="protoVersion">—</strong></div>
   </div>
   <small data-i18n="aboutNote">Versions come from the engine over native messaging. If the engine is older than the required version, update Nova Download Manager so extension and engine stay in lockstep.</small>
+  <p class="free-note" data-i18n="freeNote">Nova is 100% free — every feature, no payment, ever.</p>
 </section>
 
 <div class="status" id="status">Saved</div>

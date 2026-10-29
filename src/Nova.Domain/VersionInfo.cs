@@ -16,13 +16,13 @@ public static class VersionInfo
     public const string Product = "Nova Download Manager";
 
     /// <summary>SemVer product version — engine, app and extensions are released in lockstep.</summary>
-    public const string Version = "1.7.0";
+    public const string Version = "1.7.1";
 
     /// <summary>Release channel: dev | beta | stable.</summary>
     public const string Channel = "stable";
 
     /// <summary>Monotonic build number (Flutter pubspec '+N').</summary>
-    public const int Build = 7;
+    public const int Build = 8;
 
     /// <summary>IPC wire protocol (mirrors Nova.Ipc.Protocol.Version; cross-checked by CI).</summary>
     public const int IpcProtocol = 1;
@@ -31,11 +31,11 @@ public static class VersionInfo
     public const int DbSchema = 11;
 
     /// <summary>Minimum engine version the browser extensions require (runtime compat banner).</summary>
-    public const string MinEngineForExtension = "1.7.0";
+    public const string MinEngineForExtension = "1.7.1";
 
     /// <summary>HTTP User-Agent for every outbound engine request.</summary>
-    public const string UserAgent = "NovaDownloadManager/1.7.0";
+    public const string UserAgent = "NovaDownloadManager/1.7.1";
 
     /// <summary>BitTorrent extension-handshake v-string (BEP-10).</summary>
-    public const string PeerWireClient = "Nova DM 1.7.0";
+    public const string PeerWireClient = "Nova DM 1.7.1";
 }

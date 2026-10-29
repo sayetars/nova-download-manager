@@ -1,0 +1,27 @@
+LICENSE — Nova Download Manager
+Copyright (c) 2026 Nova Engineering
+
+FREE-FOREVER GUARANTEE (docs/FREE-FOREVER.md): no part of this program — present
+or future — may require payment: no paid tiers, no license keys, no activation,
+no paid dependencies, no paid signing/build/distribution services, no paywalled
+updates.
+
+This product is delivered as source code. Licensing terms for distribution are
+the responsibility of the party building and shipping binaries, provided that
+the free-forever guarantee above is preserved for end users.
+
+Component licensing summary (full audit: THIRD-PARTY-NOTICES.md):
+- Nova source code (C#, Dart, TypeScript): provided as-is for the commissioning
+  party without an additional OSS license grant beyond the code delivery itself.
+- .NET 8 runtime: MIT (Microsoft). Microsoft.Data.Sqlite: MIT (Microsoft);
+  SQLite: public domain. AngleSharp / BouncyCastle / FluentFTP / xunit: MIT,
+  Apache-2.0.
+- Flutter / Dart SDK: BSD-3-Clause (Google); flutter_riverpod: MIT;
+  intl: BSD-3; cupertino_icons: MIT; flutter_lints: BSD-3.
+- esbuild (build only): MIT.
+- Optional runtime dependencies the user installs separately, never bundled:
+  ffmpeg (LGPL/GPL), yt-dlp (Unlicense).
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.

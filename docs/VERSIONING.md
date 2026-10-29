@@ -150,21 +150,37 @@ The engine compares it against `VersionInfo.Version` with `Nova.Domain.SemVersio
 keep working (legacy raw-body passthrough). Recommended hosting: a GitHub Release asset
 or raw gist URL pinned in Settings.
 
-## 8. Code signing (researched 2026-10-29, next step for Windows)
+## 8. Code signing — REJECTED paid services, free path only (policy D-013)
 
-Unsigned installers trigger SmartScreen ("unknown publisher"). The cheapest legitimate
-2025/2026 path for an individual developer is **Azure Trusted Signing** (≈ **$9.99/month**,
-identity validated once with a government ID + Microsoft Authenticator; certificates renew
-every 24 h; no USB token). CA resellers charge ~$200–600/yr for OV code-signing certs and
-more for EV.
+> **User directive (2026-10-29): «برنامه نباید برای هیچ قسمتیش نیاز ب پرداخت هزینه
+> باشه» — the program must not require payment for any part.** See docs/FREE-FOREVER.md.
 
-To adopt later: create the Trusted Signing account → identity validation → certificate
-profile → in CI, `winget install Microsoft.Azure.TrustedSigningClientTools` + the
-`Microsoft.Trusted.Signing.Client` NuGet, then `signtool sign /dtr /du …` with an endpoint
-JSON (`Endpoint/CodeSigningAccountName/CertificateProfileName`) for `NovaDesktop.exe`,
-`NovaEngine.exe`, `NovaBrowserHost.exe`, `nova.exe` and the installer. The workflow
-(`windows-build.yml`) is the natural place; no code changes needed. Until then,
-"unknown publisher" is documented in README-WINDOWS.md.
+Unsigned installers trigger SmartScreen ("unknown publisher"). The 2026 research found
+**Azure Trusted Signing** (≈$9.99/month) and CA-reseller OV/EV certificates ($200–600+/yr)
+as the commercial options — **both are REJECTED by the free-forever policy**: they would
+make a part of the build/pipeline depend on a paid service. This rejection is recorded as
+DECISIONS D-013; `scripts/free_audit.py` + CI enforce that no paid signing reference
+returns to active code.
+
+The free integrity path (all of it already in place):
+
+1. **SHA-256 sidecar per artifact** — every release asset ships with a `.sha256`
+   (published on GitHub Releases and alongside every download). Users verify:
+   `sha256sum -c nova-dm-1.7.1-linux-x64.tar.gz.sha256`.
+2. **Self-signed build certificate (optional, $0)** — a builder who wants a consistent
+   publisher identity can sign locally:
+   ```powershell
+   New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Nova DM (self-signed)"
+   # export + signtool sign /fd SHA256 /tr http://timestamp.digicert.com …
+   ```
+   This removes the "file modified?" question for their own builds; it does NOT remove
+   SmartScreen for third parties (only a paid CA does). Documented, honest, free.
+3. **Reproducible channel** — the CI workflow is the auditable build path; the version
+   audit gate guarantees the tag == version.json == stamped surfaces.
+
+Until/unless the user explicitly changes the policy, "unknown publisher" warnings on
+Windows are the accepted, documented trade-off (KNOWN-LIMITATIONS #37) — the program
+costs nothing, and its integrity is verifiable via hashes.
 
 ## 9. Version visibility map
 

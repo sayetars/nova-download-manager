@@ -388,6 +388,7 @@ abstract class S {
   String get protocolLabel;
   String get schemaLabel;
   String get minEngineLabel;
+  String get freeForeverNote;
   String get upToDate;
   String get updateAvailable;
   String get updatedCheck;
@@ -694,6 +695,7 @@ class EnStrings implements S {
   @override String get protocolLabel => 'IPC protocol';
   @override String get schemaLabel => 'Database schema';
   @override String get minEngineLabel => 'Minimum engine for extensions';
+  @override String get freeForeverNote => 'Nova is 100% free — every feature, no payment, ever.';
   @override String get upToDate => 'You are up to date';
   @override String get updateAvailable => 'New version available';
   @override String get updatedCheck => 'Update check finished';
@@ -1084,6 +1086,7 @@ class FaStrings implements S {
   @override String get protocolLabel => 'پروتکل IPC';
   @override String get schemaLabel => 'اسکیمای پایگاه داده';
   @override String get minEngineLabel => 'حداقل موتور برای افزونه‌ها';
+  @override String get freeForeverNote => 'نوا ۱۰۰٪ رایگان است — همهٔ امکانات، بدون هیچ پرداختی، برای همیشه.';
   @override String get upToDate => 'شما به‌روز هستید';
   @override String get updateAvailable => 'نسخهٔ جدید موجود است';
   @override String get updatedCheck => 'بررسی به‌روزرسانی انجام شد';

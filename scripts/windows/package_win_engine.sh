@@ -26,8 +26,9 @@ cp "$ROOT/extensions/chromium/nova-chromium-${VER}.zip" "$PKG/extensions/"
 cp "$ROOT/extensions/firefox/nova-firefox-${VER}.zip" "$PKG/extensions/"
 cp "$ROOT/installer/windows/register-nativehost.ps1" "$PKG/"
 cp "$ROOT/installer/windows/README-WINDOWS.md" "$PKG/"
-cp "$ROOT"/docs/{ARCHITECTURE,BROWSER-INTEGRATION,DOWNLOAD-ENGINE,IPC-PROTOCOL,KNOWN-LIMITATIONS,SECURITY,VIDEO-DETECTION}.md "$PKG/docs/" 2>/dev/null || true
-cp "$ROOT/LICENSE.txt" "$PKG/" 2>/dev/null || true
+cp "$ROOT"/docs/{ARCHITECTURE,BROWSER-INTEGRATION,DOWNLOAD-ENGINE,IPC-PROTOCOL,KNOWN-LIMITATIONS,SECURITY,VIDEO-DETECTION,FREE-FOREVER}.md "$PKG/docs/" 2>/dev/null || true
+cp "$ROOT/LICENSE" "$PKG/" 2>/dev/null || true
+cp "$ROOT/THIRD-PARTY-NOTICES.md" "$PKG/" 2>/dev/null || true
 
 # 3) SHA256SUMS
 cd "$PKG"

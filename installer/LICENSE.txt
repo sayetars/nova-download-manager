@@ -2,6 +2,10 @@ LICENSE — Nova Download Manager
 
 Copyright (c) 2026 Nova Engineering
 
+FREE-FOREVER GUARANTEE: no part of this program requires payment — no paid tiers,
+no license keys, no activation, no paid dependencies or services. See
+docs/FREE-FOREVER.md (English + Persian) and THIRD-PARTY-NOTICES.md.
+
 This product is delivered as source code. Licensing terms for distribution
 are the responsibility of the party building and shipping binaries.
 

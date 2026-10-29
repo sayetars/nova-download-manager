@@ -9,3 +9,4 @@
 
 > Certificate rule: a session that has not read UNIVERSAL-RULES.md and recorded
 > itself here is non-compliant and must not perform implementation work.
+| 2026-10-29 | web-b38ec768 (cont., post-reset session 3) | T-022 session init (free-forever policy round — user: "برنامه نباید برای هیچ قسمتیش نیاز ب پرداخت هزینه باشه") | v1.7.0 (floor v1.7.0 — VERSIONS.md + git log + Dropbox state verified; worklog restored via restore.py state) | v1 (final constitution) | 87de0baac75ab719a23d2b83e86db430 | READ (Parts I–V full, all 185 section headers, Parts XXV–XXXII release/completion rules) + APPLIED — anti-forgetting, version-floor (verified OK), evidence-first, release-gate, honest-status rules active |

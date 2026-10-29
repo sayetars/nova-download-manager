@@ -34,8 +34,9 @@ cp "$ROOT/extensions/chromium/nova-chromium-${VER}.zip" "$PKG/extensions/"
 cp "$ROOT/extensions/firefox/nova-firefox-${VER}.zip" "$PKG/extensions/"
 
 # 6) docs + license + launcher scripts
-cp "$ROOT"/docs/{ARCHITECTURE,BROWSER-INTEGRATION,DOWNLOAD-ENGINE,IPC-PROTOCOL,KNOWN-LIMITATIONS,SECURITY,VIDEO-DETECTION}.md "$PKG/docs/" 2>/dev/null || true
-cp "$ROOT/LICENSE.txt" "$PKG/" 2>/dev/null || true
+cp "$ROOT"/docs/{ARCHITECTURE,BROWSER-INTEGRATION,DOWNLOAD-ENGINE,IPC-PROTOCOL,KNOWN-LIMITATIONS,SECURITY,VIDEO-DETECTION,FREE-FOREVER}.md "$PKG/docs/" 2>/dev/null || true
+cp "$ROOT/LICENSE" "$PKG/" 2>/dev/null || true
+cp "$ROOT/THIRD-PARTY-NOTICES.md" "$PKG/" 2>/dev/null || true
 cp "$ROOT/installer/linux/RUN-LINUX.sh" "$PKG/"
 cp "$ROOT/installer/linux/register-browser-host.sh" "$PKG/"
 cp "$ROOT/installer/linux/README-QUICKSTART-LINUX.md" "$PKG/"

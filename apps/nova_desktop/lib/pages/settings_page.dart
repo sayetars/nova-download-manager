@@ -349,6 +349,21 @@ class SettingsPage extends ConsumerWidget {
                                     fontSize: 13, fontFeatures: [FontFeature.tabularFigures()]))),
                       ]),
                     ),
+                  // ---- v1.7.1: free-forever guarantee (docs/FREE-FOREVER.md) ----
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Row(children: [
+                      Icon(Icons.volunteer_activism_outlined,
+                          size: 16, color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                          child: Text(s.freeForeverNote,
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(context).colorScheme.primary))),
+                    ]),
+                  ),
                 ],
               );
             },

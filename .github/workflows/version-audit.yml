@@ -27,6 +27,9 @@ jobs:
       - name: Version audit (all surfaces must match version.json)
         run: python3 scripts/sync_versions.py --check
 
+      - name: Free-forever audit (no paid dependencies or paid services)
+        run: python3 scripts/free_audit.py
+
       - name: Version sanity (release tags match version.json)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
