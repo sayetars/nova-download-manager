@@ -44,3 +44,6 @@ extensions/*/nova-*.zip
 tools/dotnet/
 tools/llvm*/
 
+# parallel-tree guard (D-012/D-014): the v0.1.0 nova/ tree must never return
+nova/
+

@@ -35,6 +35,7 @@ This repository was **built and tested on Linux** (.NET 8.0.426 + Flutter 3.47.7
 15. **MP4 files with the `moov` atom at the END cannot be previewed meaningfully** — that is inherent to the container (the player needs the index before the media data; "faststart" files and TS/MKV stream fine). The preview still serves the bytes; the player simply may refuse or stall.
 16. **Metalink PGP "require" policy fails the task but keeps the temp file** — resume/retry with a corrected keyring works without redownloading completed pieces.
 17. **Server performance profiles are advisory** — they reorder equal-priority metalink mirrors and inform the Settings table; they never override an explicit higher-priority mirror (RFC 5854 priority is authoritative).
+18. **PAC (proxy auto-config) script evaluation is not implemented** — static proxy configuration only (HTTP/SOCKS4/4a/5 + auth + bypass lists). A PAC engine would add a JS interpreter dependency (Jint, MIT — free- and license-compliant); recorded as a future item after the 2026-10-30 parallel-tree audit (DECISIONS D-014 — it was the tree's one genuine delta). WPAD/DHCP auto-discovery stays out of scope.
 
 ## Environment-sensitive tests (this Linux sandbox)
 

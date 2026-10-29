@@ -38,6 +38,6 @@ Cloud pruned 2026-10-28 per the user's space directive (CLOUD-POLICY.md): keep o
 | nova-chromium-1.5.0.zip / nova-firefox-1.5.0.zip (+ .sha256) | v1.5.0 | [removed 2026-10-29] superseded by v1.7.0 (current) + v1.6.0 (previous) per keep-2 |
 | nova-dm-1.4.1-linux-x64.tar.gz (48,266,349 B, sha256 fe34c36a7527493b37105583254cdbb2149fe8c97e5bbd79b93608ebb1c1c384) | v1.4.1 | [removed 2026-10-29] was previous-release; superseded by v1.6.0 (current) + v1.5.0 zips (previous) per CLOUD-POLICY keep-2 |
 | nova-chromium-1.4.1.zip / nova-firefox-1.4.1.zip | v1.4.1 | [removed 2026-10-29] same policy |
-| nova-dm-1.5.0-linux-x64.tar.gz | v1.5.0 | NOT IN CLOUD — never was (T-019 correction); v1.6.0 tarball now supersedes it |
+| nova-dm-1.5.0-linux-x64.tar.gz | v1.5.0 | [removed 2026-10-30] T-019's "never in cloud" was wrong — found in a stray root-level /builds (outside the canonical namespace, invisible to the T-019 audit); removed per keep-2 (current 1.7.1 + previous 1.7.0) during the T-023 cloud cleanup |
 | nova-dm-1.0.1 / 1.1.0 / 1.2.0 / 1.3.0 / 1.4.0 tarballs; 1.2.0 / 1.4.0 extension zips | ≤ v1.4.0 | [removed 2026-10-28] were published 2026-10-23/24 (sha256 recorded in git history of this file) |
 | evidence-*.png / evidence-*-vlm.json | v1.0.1–1.2.0 | [removed 2026-10-28] QA evidence — not resume-essential |
