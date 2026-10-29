@@ -2,6 +2,22 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [1.7.1] — 2026-10-29
+
+**The free-forever round** (user directive: «برنامه نباید برای هیچ قسمتیش نیاز ب پرداخت هزینه باشه» — the program must not require payment for any part). Nova now carries a hard, CI-enforced guarantee that no part of it — present or future — requires payment. C# 242/242, Flutter 13 + 0 analyze errors, both audits PASS, Linux tarball + Windows engine zip + extension zips rebuilt at 1.7.1, bundle smoke + clean-env tarball PASS.
+
+### Added — free-forever policy (the headline)
+- **`docs/FREE-FOREVER.md`** — the policy as a hard project invariant (EN + فارسی): no paid tiers/keys/activation, no paid dependencies, no paid signing/build/distribution services, no paywalled updates; enforcement and verification documented.
+- **`THIRD-PARTY-NOTICES.md`** — complete dependency license/cost audit: 13 recorded direct dependencies, all $0 + free licenses (MIT/Apache/BSD/Unlicense), plus platforms/tools and an explicitly-banned list. Doubles as the machine allowlist.
+- **`scripts/free_audit.py`** — the CI gate: every NuGet/pub/npm dependency must be recorded in THIRD-PARTY-NOTICES.md (license + $0), and banned paid-service terms (Trusted Signing, Real-Debrid, Premiumize, AllDebrid, paid-license phrasing) must not appear in product code or active docs (append-only history exempt; policy/rejection context allowed). First run immediately caught the unrecorded SSH.NET dependency.
+- **CI**: a `Free-forever audit` step in `version-audit.yml` — a tree that adds a paid dependency or paid service cannot build.
+- **Root `LICENSE`** (first time) + updated `installer/LICENSE.txt`: free-forever guarantee clause + component summary; both release packages now ship `LICENSE` + `THIRD-PARTY-NOTICES.md` + `docs/FREE-FOREVER.md`.
+- **User-facing guarantee**: Settings → Versions gains a bilingual "Nova is 100% free — every feature, no payment, ever." line (strings.dart EN/FA); the extension options About section gains the same line (EN/FA, RTL-aware).
+
+### Changed
+- **Azure Trusted Signing (~$9.99/mo) REJECTED** — researched in T-021, rejected here by the user directive (DECISIONS D-013): `docs/VERSIONING.md` §8 rewritten from the adoption recipe to the free integrity path (SHA-256 sidecars + optional self-signed certificates, recipe included); `docs/KNOWN-LIMITATIONS.md` #37 updated (SmartScreen stays, hashes verify integrity); STATE/RESUME-POINT roadmaps no longer list it.
+- **PROJECT-RULES invariant 7** — free-forever added next to the security invariants; `scripts/sync_versions.py` v1.7.1 stamp (build 8).
+
 ## [1.7.0] — 2026-10-29
 
 **The version-integrity round** (user directive: "نسخه‌بندی یادت نره تا قاطی نشه نسخه‌ها باهم" — never let versions get mixed) **+ AES-128 HLS** (deep-research round 5's top gap). On entry the repo claimed five different versions at once (props 1.6.0, pubspec 1.5.0+6, installer 1.0.0, `engine_status` default "1.5.0", CI literals 1.6.0) and carried a 73 MB abandoned parallel tree. v1.7.0 makes that class of drift structurally impossible: `version.json` is now the single source of truth, ten surfaces are stamped from it, CI refuses drifted trees, the engine refuses mismatched schemas at boot, and users see every component version with live compatibility banners. C# suite 208 → **242 tests** (+34); Flutter 13 tests + 0 analyze errors; Linux tarball + Windows engine zip rebuilt; bundle smoke + clean-env tarball test PASS.

@@ -1,17 +1,19 @@
 # PROJECT-TREE — Nova Download Manager
-# version v1.7.0 · git 3c219fd · 2026-10-28T21:28:23
-# exact file-set carried by the Dropbox source checkpoint (276 files, 2,291,436 bytes uncompressed)
+# version v1.7.1 · git 8ac1ecd · 2026-10-29T07:23:46
+# exact file-set carried by the Dropbox source checkpoint (298 files, 2,388,526 bytes uncompressed)
 # (regenerate: python3 scripts/gen_project_tree.py)
 
 .env
 .github/
   workflows/
+    version-audit.yml
     windows-build.yml
 .gitignore
 CHANGELOG.md
 CLOUD-POLICY.md
 DECISIONS.md
 Directory.Build.props
+LICENSE
 Nova.sln
 PROJECT-RULES.md
 PROJECT-TREE.txt
@@ -20,6 +22,7 @@ RECOVERY.md
 RESUME-POINT.md
 RULES-READ-LEDGER.md
 STATE.md
+THIRD-PARTY-NOTICES.md
 UNIVERSAL-RULES.md
 VERSIONS.md
 apps/
@@ -31,6 +34,7 @@ apps/
     lib/
       app.dart
       core/
+        build_version.dart
         engine_client.dart
         models.dart
         protocol.dart
@@ -105,12 +109,21 @@ docs/
   BUILD-AND-RELEASE.md
   DOWNLOAD-ENGINE.md
   FEATURE-GAP-2026.md
+  FREE-FOREVER.md
   IDM-PARITY.md
   IPC-PROTOCOL.md
   KNOWN-LIMITATIONS.md
   SECURITY.md
   TESTING.md
+  VERSIONING.md
   VIDEO-DETECTION.md
+  history/
+    legacy-nova-tree/
+      KNOWN-LIMITATIONS.md
+      README.md
+      ROUND-12.md
+      SESSIONS.md
+      WORKLOG.md
 extensions/
   build.mjs
   chromium/
@@ -132,6 +145,8 @@ extensions/
       icon48.png
     manifest.json
     nova-chromium-1.5.0.zip.sha256
+    nova-chromium-1.7.0.zip.sha256
+    nova-chromium-1.7.1.zip.sha256
     src/
       background.ts
       content.ts
@@ -156,6 +171,8 @@ extensions/
       icon48.png
     manifest.json
     nova-firefox-1.5.0.zip.sha256
+    nova-firefox-1.7.0.zip.sha256
+    nova-firefox-1.7.1.zip.sha256
     src/
       background.ts
       content.ts
@@ -192,6 +209,7 @@ scripts/
   fix-sysroot.sh
   flutter-releases.json
   flutter-url.txt
+  free_audit.py
   gen_project_tree.py
   linux/
     bootstrap_toolchain.sh
@@ -207,6 +225,7 @@ scripts/
     tarball_cleanenv_test.sh
     ui_smoke.sh
   nova_dropbox_upload.py
+  sync_versions.py
   upload_v120_dropbox.py
   vlm_mini_check.py
   windows/
@@ -227,7 +246,9 @@ src/
     Nova.Domain.csproj
     Profiles.cs
     Result.cs
+    SemVersion.cs
     UrlHost.cs
+    VersionInfo.cs
   Nova.Engine/
     ArchiveTools.cs
     DownloadDataFile.cs
@@ -289,6 +310,7 @@ src/
     Protocol.cs
   Nova.Media/
     DashParser.cs
+    HlsCrypt.cs
     HlsParser.cs
     MediaCandidatesService.cs
     MediaDtos.cs
@@ -331,10 +353,12 @@ tests/
     V13FeatureTests.cs
     V150Tests.cs
     V160Tests.cs
+    V170Tests.cs
 tools/
   dropbox/
     backup.py
     dropbox.py
     inventory.py
     restore.py
+version.json
 worklog.md
