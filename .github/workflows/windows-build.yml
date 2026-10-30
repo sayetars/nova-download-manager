@@ -66,8 +66,18 @@ jobs:
           Get-ChildItem publish/win-x64 -Recurse -Filter *.pdb | Remove-Item
 
       # ---------------------------------------------------------------- engine tests (same OS as the target!)
+      # T-026 (CI diagnosis round): --blame-hang names+aborts a hanging test
+      # instead of eating the whole job budget; NOVA_TEST_TIMEOUT_SCALE gives
+      # slow windows runners headroom; timeout dumps include per-task engine
+      # diagnostics (state/error/retries) from the test Wait helpers.
       - name: Engine test suite
-        run: dotnet test Nova.sln --filter "FullyQualifiedName!~BrowserPathTests"
+        env:
+          NOVA_TEST_TIMEOUT_SCALE: '3'
+        run: >
+          dotnet test Nova.sln
+          --filter "FullyQualifiedName!~BrowserPathTests"
+          --blame-hang --blame-hang-timeout 20m --blame-hang-dump-type mini
+          --logger "console;verbosity=normal"
 
       # ---------------------------------------------------------------- UI
       - name: Build Flutter Windows UI

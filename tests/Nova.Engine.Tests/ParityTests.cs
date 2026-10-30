@@ -123,8 +123,15 @@ public class LoginVaultTests : IDisposable
     public void SecretsAreEncryptedAtRest()
     {
         _vault.Save("site.org", "", "bob", "plain-leetcode");
-        // raw DB must not contain the plaintext
-        var raw = File.ReadAllText(Path.Combine(_dir, "t.db"));
+        // raw DB must not contain the plaintext. Open with FileShare.ReadWrite:
+        // on Windows the pooled SQLite connection still holds the file, and the
+        // default File.ReadAllText open (FileShare.Read) collides with it
+        // ("being used by another process") — T-026 CI diagnosis round.
+        string raw;
+        using (var fs = new FileStream(Path.Combine(_dir, "t.db"), FileMode.Open,
+            FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        using (var sr = new StreamReader(fs))
+            raw = sr.ReadToEnd();
         Assert.DoesNotContain("plain-leetcode", raw);
     }
 

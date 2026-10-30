@@ -231,11 +231,32 @@ public class V160Tests : IAsyncLifetime
     }
 
     // ------------------------------------------------------------ yt-dlp runner E2E (fake binary)
+    /// <summary>Writes a fake yt-dlp executable for the current OS: a POSIX shell script
+    /// on Linux/macOS, a batch file on Windows (T-026: the .sh variant cannot execute on
+    /// Windows runners — "not a valid application for this OS platform").</summary>
+    private async Task<string> WriteFakeYtDlpAsync(string name, string shBody, string cmdBody)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            var sh = Path.Combine(_tmp, name + ".sh");
+            await File.WriteAllTextAsync(sh, shBody);
+            var chmod = Process.Start("chmod", "+x " + sh);
+            Assert.NotNull(chmod);
+            Assert.True(chmod!.WaitForExit(5000));
+            Assert.Equal(0, chmod.ExitCode);
+            return sh;
+        }
+        var cmd = Path.Combine(_tmp, name + ".cmd");
+        await File.WriteAllTextAsync(cmd, cmdBody);
+        return cmd;
+    }
+
     [Fact]
     public async Task YtDlpRunner_FakeBinary_Merges_Two_Phases_And_Reports_Progress()
     {
-        var bin = Path.Combine(_tmp, "fake-ytdlp.sh");
-        await File.WriteAllTextAsync(bin, $"""
+        // POSIX variant: parse -o from argv, emit yt-dlp progress lines, write both
+        // format files and concatenate them into the merged output.
+        const string sh = """
             #!/bin/sh
             out=""
             prev=""
@@ -258,12 +279,36 @@ public class V160Tests : IAsyncLifetime
             echo "[Merger] Merging formats into \"$merged\""
             cat "$f1" "$f2" > "$merged"
             exit 0
-            """);
-        // NOTE: Process.Start does NOT go through a shell — pass the raw path, no quotes.
-        var chmod = Process.Start("chmod", "+x " + bin);
-        Assert.NotNull(chmod);
-        Assert.True(chmod!.WaitForExit(5000));
-        Assert.Equal(0, chmod.ExitCode);
+            """;
+        // Windows variant: identical behaviour in batch (% doubled; fsutil makes the
+        // exact-size zero files; copy /b concatenates). ".%(ext)s" is 7 trailing chars.
+        const string cmd = """
+            @echo off
+            setlocal enabledelayedexpansion
+            set "out="
+            set "prev="
+            for %%a in (%*) do (
+              if "!prev!"=="-o" set "out=%%a"
+              set "prev=%%a"
+            )
+            set "base=!out:~0,-7!"
+            set "f1=!base!.f137.mp4"
+            set "f2=!base!.f251.m4a"
+            set "merged=!base!.mp4"
+            echo [download] Destination: !f1!
+            echo [download]  40.0%% of    1.00MiB at    1.00MiB/s ETA 00:01
+            echo [download] 100.0%% of    1.00MiB in 00:01
+            fsutil file createnew "!f1!" 1048576 >nul
+            echo [download] Destination: !f2!
+            echo [download]  50.0%% of  512.00KiB at    1.00MiB/s ETA 00:00
+            echo [download] 100.0%% of  512.00KiB in 00:00
+            fsutil file createnew "!f2!" 524288 >nul
+            echo [Merger] Merging formats into "!merged!"
+            copy /b "!f1!"+"!f2!" "!merged!" >nul
+            endlocal
+            exit /b 0
+            """;
+        var bin = await WriteFakeYtDlpAsync("fake-ytdlp", sh, cmd);
 
         var dest = Path.Combine(_tmp, "dest");
         Directory.CreateDirectory(dest);
@@ -297,16 +342,17 @@ public class V160Tests : IAsyncLifetime
     [Fact]
     public async Task YtDlpRunner_FakeBinary_Failure_Maps_To_Structured_Error()
     {
-        var bin = Path.Combine(_tmp, "fake-ytdlp-fail.sh");
-        await File.WriteAllTextAsync(bin, """
+        const string sh = """
             #!/bin/sh
             echo "ERROR: unable to download video data: HTTP Error 403: Forbidden" >&2
             exit 1
-            """);
-        var chmod = Process.Start("chmod", "+x " + bin);
-        Assert.NotNull(chmod);
-        Assert.True(chmod!.WaitForExit(5000));
-        Assert.Equal(0, chmod.ExitCode);
+            """;
+        const string cmd = """
+            @echo off
+            echo ERROR: unable to download video data: HTTP Error 403: Forbidden 1>&2
+            exit /b 1
+            """;
+        var bin = await WriteFakeYtDlpAsync("fake-ytdlp-fail", sh, cmd);
 
         var task = new DownloadTask
         {

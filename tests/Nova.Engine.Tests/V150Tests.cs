@@ -67,7 +67,7 @@ public sealed class V150PreviewTests
             new SegmentView(1, 2000, 2999, 1000),
         };
         using var server = StartServer(temp, views);
-        using var http = new HttpClient();
+        using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }); // loopback: never via system proxy (T-026)
 
         var resp = await http.GetAsync($"http://127.0.0.1:{server.Port}/tok123/k1/video.mp4");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -86,7 +86,7 @@ public sealed class V150PreviewTests
         var temp = WriteTempFile("movie.ts.novadl", data);
         var views = new[] { new SegmentView(0, 0, 2999, 1000) };
         using var server = StartServer(temp, views);
-        using var http = new HttpClient();
+        using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }); // loopback: never via system proxy (T-026)
 
         var req = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{server.Port}/tok123/k1/movie.ts");
         req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(100, 199);
@@ -107,7 +107,7 @@ public sealed class V150PreviewTests
     {
         var temp = WriteTempFile("a.mp4.novadl", new byte[100]);
         using var server = StartServer(temp, new[] { new SegmentView(0, 0, 99, 100) });
-        using var http = new HttpClient();
+        using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }); // loopback: never via system proxy (T-026)
 
         var bad = await http.GetAsync($"http://127.0.0.1:{server.Port}/WRONG/k1/a.mp4");
         Assert.Equal(HttpStatusCode.NotFound, bad.StatusCode);
@@ -122,7 +122,7 @@ public sealed class V150PreviewTests
         var temp = WriteTempFile("clip.mkv.novadl", TestBytes.Pattern(2000));
         var views = new[] { new SegmentView(0, 0, 1999, 700) };
         using var server = StartServer(temp, views);
-        using var http = new HttpClient();
+        using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }); // loopback: never via system proxy (T-026)
 
         var head = new HttpRequestMessage(HttpMethod.Head, $"http://127.0.0.1:{server.Port}/tok123/k1/clip.mkv");
         var h = await http.SendAsync(head);
