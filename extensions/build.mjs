@@ -1,6 +1,6 @@
 import { build } from 'esbuild';
 import { mkdirSync, existsSync, copyFileSync } from 'fs';
-import { execSync } from 'child_process';
+import { zipDirectory } from './zip.mjs';
 
 const zip = process.argv.includes('--zip');
 // version comes from the browser manifest (single source of truth)
@@ -37,8 +37,9 @@ for (const t of targets) {
     }
   }
   if (zip) {
-    execSync(`cd ${t.name}/dist && zip -qr ../nova-${t.name}-${manifestVersion}.zip .`, { stdio: 'inherit' });
-    console.log(`→ ${t.name}/nova-${t.name}-${manifestVersion}.zip`);
+    // T-026: dependency-free STORE zip — the `zip` CLI is absent on Windows.
+    const size = zipDirectory(`${t.name}/dist`, `${t.name}/nova-${t.name}-${manifestVersion}.zip`);
+    console.log(`→ ${t.name}/nova-${t.name}-${manifestVersion}.zip (${size} bytes)`);
   }
 }
 console.log('done');
