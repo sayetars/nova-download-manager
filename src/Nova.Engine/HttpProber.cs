@@ -17,15 +17,21 @@ public sealed class HttpProber
     }
 
     /// <exception cref="NovaHttpException">structured, categorized failure.</exception>
-    public async Task<HttpProbeResult> ProbeAsync(string url, string? referer, CancellationToken ct, DownloadTask? task = null)
+    public async Task<HttpProbeResult> ProbeAsync(string url, string? referer, CancellationToken ct, DownloadTask? task = null,
+        string? authorization = null)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
         AddDefaultHeaders(req, referer);
         if (task is not null) TaskRunner.ApplyTaskHeaders(req, task);
+        // v1.8.0 (IDM login-dialog parity): explicit Authorization for the auth-retry probe.
+        if (!string.IsNullOrEmpty(authorization))
+            req.Headers.TryAddWithoutValidation("Authorization", authorization);
 
         using var resp = await SendGuardedAsync(req, ct);
 
+        if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.ProxyAuthenticationRequired)
+            throw NovaHttpException.FromStatus(resp.StatusCode, url);
         if (!resp.IsSuccessStatusCode && resp.StatusCode != HttpStatusCode.PartialContent)
             throw NovaHttpException.FromStatus(resp.StatusCode, url);
 
@@ -132,6 +138,7 @@ public sealed class NovaHttpException : Exception
         var (code, cat, retry) = status switch
         {
             HttpStatusCode.Unauthorized => ("http_401", ErrorCategory.Auth, false),
+            HttpStatusCode.ProxyAuthenticationRequired => ("http_407", ErrorCategory.Auth, false),
             HttpStatusCode.Forbidden => ("http_403", ErrorCategory.Forbidden, false),
             HttpStatusCode.NotFound => ("http_404", ErrorCategory.NotFound, false),
             HttpStatusCode.RequestTimeout => ("http_408", ErrorCategory.Network, true),

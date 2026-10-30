@@ -181,16 +181,112 @@ class _QueueCard extends ConsumerWidget {
             ],
             Align(
               alignment: AlignmentDirectional.centerEnd,
-              child: TextButton.icon(
-                onPressed: () => _editSchedule(context, ref, s, queue),
-                icon: const Icon(Icons.schedule_rounded, size: 16),
-                label: Text(s.queueSchedule, style: const TextStyle(fontSize: 12.5)),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // v1.8.0 (IDM Scheduler dialog parity): per-queue retry limit +
+                  // "open the following file when done" post action.
+                  TextButton.icon(
+                    onPressed: () => _editQueueOptions(context, ref, s, queue),
+                    icon: const Icon(Icons.tune_rounded, size: 16),
+                    label: Text(s.queueOptions, style: const TextStyle(fontSize: 12.5)),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _editSchedule(context, ref, s, queue),
+                    icon: const Icon(Icons.schedule_rounded, size: 16),
+                    label: Text(s.queueSchedule, style: const TextStyle(fontSize: 12.5)),
+                  ),
+                ],
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// v1.8.0 (IDM Scheduler "Files in the queue" tab parity): per-queue retry
+  /// budget and on-completion action (open a file / run a program / power).
+  Future<void> _editQueueOptions(BuildContext context, WidgetRef ref, S s, QueueUi queue) async {
+    final engine = ref.read(prov.engineProvider);
+    final settings = ref.read(prov.settingsProvider);
+    final retries = TextEditingController(
+        text: settings['queue.max_retries.${queue.name}'] ?? '5');
+    final openPath = TextEditingController(
+        text: (settings['queue.post_action.${queue.name}'] ?? '').startsWith('open:')
+            ? (settings['queue.post_action.${queue.name}'] as String).substring(5)
+            : '');
+    var powerAction = (settings['queue.post_action.${queue.name}'] ?? '')
+            .startsWith('open:')
+        ? 'none'
+        : (settings['queue.post_action.${queue.name}'] ?? 'none');
+    if (powerAction.isEmpty) powerAction = 'none';
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text('${s.queueOptions}: ${queue.name}'),
+          content: SizedBox(
+            width: 460,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(
+                controller: retries,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(labelText: s.queueRetries),
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                initialValue: powerAction,
+                decoration: InputDecoration(labelText: s.queuePostAction),
+                items: [
+                  DropdownMenuItem(value: 'none', child: Text(s.postActionNone)),
+                  DropdownMenuItem(value: 'exit', child: Text(s.postActionExit)),
+                  DropdownMenuItem(value: 'shutdown', child: Text(s.postActionShutdown)),
+                  DropdownMenuItem(value: 'hibernate', child: Text(s.postActionHibernate)),
+                  DropdownMenuItem(value: 'sleep', child: Text(s.postActionSleep)),
+                  DropdownMenuItem(value: 'logoff', child: Text(s.postActionLogoff)),
+                  DropdownMenuItem(value: 'open', child: Text(s.postActionOpenFile)),
+                ],
+                onChanged: (v) => setState(() => powerAction = v ?? 'none'),
+              ),
+              if (powerAction == 'open') ...[
+                const SizedBox(height: 14),
+                TextField(
+                  controller: openPath,
+                  decoration: InputDecoration(
+                    labelText: s.postActionOpenPath,
+                    hintText: 'C:\\done\\notify.bat',
+                  ),
+                ),
+              ],
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: Text(s.cancel)),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(s.save),
+            ),
+          ],
+        ),
+      ),
+    ).then((ok) async {
+      retries.dispose();
+      openPath.dispose();
+      if (ok != true) return;
+      final action = powerAction == 'none'
+          ? ''
+          : powerAction == 'open'
+              ? 'open:${openPath.text.trim()}'
+              : powerAction;
+      await engine?.call('set_settings', {
+        'values': {
+          'queue.max_retries.${queue.name}': retries.text.trim(),
+          'queue.post_action.${queue.name}': action,
+        }
+      });
+    });
   }
 
   Widget _chip(BuildContext context, String text, Color color) => Container(

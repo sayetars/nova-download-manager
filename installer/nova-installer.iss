@@ -9,7 +9,7 @@
 ;    uses the user-profile manifest dir. Uninstall offers to KEEP settings/history.
 
 #define MyAppName "Nova Download Manager"
-#define MyAppVersion "1.7.1"
+#define MyAppVersion "1.8.0"
 #define MyAppPublisher "Nova Engineering"
 #define MyAppExeName "NovaDesktop.exe"
 

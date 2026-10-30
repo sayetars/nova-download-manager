@@ -44,6 +44,11 @@ public sealed class EngineHostApp : IAsyncDisposable
     private readonly Nova.Engine.Security.PgpKeyringService _pgpKeys;
     private readonly Nova.Engine.YtDlp.YtDlpBridge _ytdlp;
     private readonly DhtPeerStoreDb? _dhtPeerStore;
+    private readonly Nova.Persistence.QueueRepository _queueRepo;
+    /// <summary>v1.8.0 (IDM Scheduler parity): per-queue "open the following file when done"
+    /// — remembers which queues were running so the active→idle transition can fire
+    /// the queue's post action (settings key queue.post_action.&lt;queue&gt;).</summary>
+    private readonly Dictionary<string, bool> _queueWasActive = new(StringComparer.OrdinalIgnoreCase);
     private string _pendingPostAction = "";
     private bool _postActionCancelled;
 
@@ -80,6 +85,7 @@ public sealed class EngineHostApp : IAsyncDisposable
         _http = CreateHttpClient();
         _vault = new LoginVault(_db, _dataDir);
         _grabber = new GrabberService(_db);
+        _queueRepo = new Nova.Persistence.QueueRepository(_db);
 
         var antivirus = new Antivirus(
             enabled: _settings.Get("av.enabled") == "true",
@@ -184,6 +190,37 @@ public sealed class EngineHostApp : IAsyncDisposable
         catch (Exception ex)
         {
             EngineLog.Warn($"post-action eval failed: {ex.Message}");
+        }
+
+        // v1.8.0 (IDM Scheduler parity): per-queue post actions — "Open the following
+        // file when done" (queue.post_action.<queue> = "open:<path>" or any other
+        // PostActionRunner action). Fires on the active→idle transition of THAT
+        // queue, independently of the engine-wide action above, mirroring IDM's
+        // per-queue scheduler dialog.
+        try
+        {
+            var activeQueues = new HashSet<string>(_engine.All()
+                .Where(t => t.State is DownloadState.Downloading or DownloadState.Queued
+                    or DownloadState.Analyzing or DownloadState.Verifying or DownloadState.Pausing
+                    or DownloadState.Retrying or DownloadState.Paused)
+                .Select(t => t.QueueName), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var queue in _queueRepo.GetAll().Select(q => q.Name))
+            {
+                var isActive = activeQueues.Contains(queue);
+                var wasActive = _queueWasActive.TryGetValue(queue, out var w) && w;
+                _queueWasActive[queue] = isActive;
+                if (!wasActive || isActive) continue;
+
+                var queueAction = _settings.Get($"queue.post_action.{queue}");
+                if (string.IsNullOrEmpty(queueAction) || !PostActionRunner.IsValid(queueAction)) continue;
+                EngineLog.Info($"queue '{queue}' finished → post action '{queueAction}'");
+                PostActionRunner.Execute(queueAction, RequestShutdown, s => EngineLog.Info(s));
+            }
+        }
+        catch (Exception ex)
+        {
+            EngineLog.Warn($"queue post-action eval failed: {ex.Message}");
         }
     }
 

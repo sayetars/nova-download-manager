@@ -27,6 +27,19 @@ public sealed class GrabberService
         public string ExcludeFilter { get; init; } = "";
         public string SaveDirectory { get; init; } = "";
         public string? BoundaryHost { get; init; }
+        /// <summary>v1.8.0 (IDM Grabber step 3): "Don't explore parent directories" —
+        /// pages above the start page's directory stay unexplored (default, IDM-like).</summary>
+        public bool ExploreParentDirectories { get; init; }
+        /// <summary>v1.8.0 (IDM Grabber step 3): "Explore all sites within the main
+        /// domain" — the boundary widens to the registrable domain (www.x.com → x.com).</summary>
+        public bool ExploreSubdomains { get; init; }
+        /// <summary>v1.8.0 (IDM Grabber step 3): levels to process on OTHER sites
+        /// (0 = current site only, the conservative default).</summary>
+        public int ExternalDepth { get; init; }
+        /// <summary>v1.8.0 (IDM Grabber step 4): skip files smaller than this (0 = off).</summary>
+        public long MinBytes { get; init; }
+        /// <summary>v1.8.0 (IDM Grabber step 4): skip files larger than this (0 = off).</summary>
+        public long MaxBytes { get; init; }
     }
 
     public sealed record GrabberProgress(int PagesDone, int PagesQueued, int FilesDone, long BytesDone, string Current);
@@ -42,13 +55,18 @@ public sealed class GrabberService
         CancellationToken ct = default)
     {
         var root = new Uri(rootUrl);
-        var boundary = opts.BoundaryHost ?? root.Host;
+        // v1.8.0 (IDM Grabber step 3 parity): "Explore all sites within the main domain"
+        // widens the boundary from the exact start host to its registrable domain
+        // (www.tonec.com → tonec.com, covering ftp.tonec.com and sibling subdomains).
+        var boundary = opts.BoundaryHost
+                       ?? (opts.ExploreSubdomains ? RegistrableDomain(root.Host) : root.Host);
+        var startDir = RootDirectory(root); // parent-directory rule scope
 
-        var pageQueue = new ConcurrentQueue<(Uri url, int depth)>();
+        var pageQueue = new ConcurrentQueue<(Uri url, int depth, int externalHops)>();
         var visited = new ConcurrentDictionary<Uri, byte>(UriComparer.Instance);
         var resources = new ConcurrentDictionary<Uri, byte>(UriComparer.Instance);
 
-        pageQueue.Enqueue((root, 0));
+        pageQueue.Enqueue((root, 0, 0));
         visited.TryAdd(root, 0);
 
         int pagesDone = 0, filesDone = 0;
@@ -58,7 +76,7 @@ public sealed class GrabberService
 
         while (pageQueue.TryDequeue(out var item) && !ct.IsCancellationRequested)
         {
-            var (pageUrl, depth) = item;
+            var (pageUrl, depth, externalHops) = item;
             Interlocked.Decrement(ref pagesQueued);
             Emit(pageUrl.ToString());
 
@@ -102,10 +120,11 @@ public sealed class GrabberService
                     if (!PassesFilters(link, opts)) continue;
 
                     var clean = Clean(link);
-                    if (!clean.Host.Equals(boundary, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!ShouldExplore(clean, root, boundary, startDir, opts, externalHops)) continue;
+                    var nextExternal = IsOnSite(clean.Host, boundary, opts) ? externalHops : externalHops + 1;
                     if (visited.TryAdd(clean, 0))
                     {
-                        pageQueue.Enqueue((clean, depth + 1));
+                        pageQueue.Enqueue((clean, depth + 1, nextExternal));
                         Interlocked.Increment(ref pagesQueued);
                     }
                 }
@@ -128,6 +147,10 @@ public sealed class GrabberService
             Emit(pageUrl.ToString());
         }
 
+        // v1.8.0 BUG FIX: the counters were persisted to the project row but never
+        // copied into GrabberResult — callers (tests, future UI wiring) always saw 0.
+        result.FilesDone = filesDone;
+        result.BytesDone = bytesDone;
         SaveProject(rootUrl, opts, pagesDone, filesDone, bytesDone);
         return result;
 
@@ -192,6 +215,8 @@ public sealed class GrabberService
             cmd.Parameters.AddValue("@o", System.Text.Json.JsonSerializer.Serialize(new
             {
                 opts.FollowLinks, opts.Images, opts.Css, opts.Scripts, opts.Video, opts.RewriteForOffline,
+                opts.ExploreParentDirectories, opts.ExploreSubdomains, opts.ExternalDepth,
+                opts.MinBytes, opts.MaxBytes,
             }));
             cmd.Parameters.AddValue("@s", opts.SaveDirectory);
             cmd.Parameters.AddValue("@t", DateTimeOffset.UtcNow.ToString("O"));
@@ -233,16 +258,49 @@ public sealed class GrabberService
             Directory.CreateDirectory(Path.GetDirectoryName(local)!);
             using var resp = await http.GetAsync(res, ct);
             if (!resp.IsSuccessStatusCode) return (false, 0);
+
+            // v1.8.0 (IDM Grabber step 4 parity): file size limits. A known
+            // Content-Length is checked up-front; an unknown length is enforced
+            // during the copy (over-Max files are aborted and removed).
+            var declared = resp.Content.Headers.ContentLength ?? -1;
+            if (!PassesSizeFilter(declared, opts.MinBytes, opts.MaxBytes)) return (false, 0);
+
             await using var src = await resp.Content.ReadAsStreamAsync(ct);
             await using var dst = new FileStream(local, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, useAsync: true);
-            await src.CopyToAsync(dst, ct);
-            return (true, dst.Length);
+            var buffer = new byte[1 << 16];
+            long copied = 0;
+            while (true)
+            {
+                var read = await src.ReadAsync(buffer, ct);
+                if (read <= 0) break;
+                copied += read;
+                if (opts.MaxBytes > 0 && copied > opts.MaxBytes)
+                {
+                    // unknown-length resource turned out too large — undo honestly
+                    dst.Dispose();
+                    TryDelete(local);
+                    return (false, 0);
+                }
+                await dst.WriteAsync(buffer.AsMemory(0, read), ct);
+            }
+            if (opts.MinBytes > 0 && copied < opts.MinBytes)
+            {
+                dst.Dispose();
+                TryDelete(local);
+                return (false, 0);
+            }
+            return (true, copied);
         }
         catch (Exception ex)
         {
             EngineLog.Warn($"[grabber] resource failed {res}: {ex.Message}");
             return (false, 0);
         }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch { /* best effort */ }
     }
 
     /// <summary>Map URL → local path preserving directory structure; path traversal blocked.</summary>
@@ -252,7 +310,15 @@ public sealed class GrabberService
         var query = url.Query;
         if (string.IsNullOrEmpty(rel) || rel.EndsWith("/")) rel += isPage ? "index.html" : "file";
         if (isPage && !Path.HasExtension(rel)) rel += "/index.html";
-        rel = string.Join("_", rel.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
+        // v1.8.0 BUG FIX: '/' is in GetInvalidFileNameChars on every OS, so the old
+        // single flat join turned "support/pic.png" into "support_pic.png" — the
+        // documented "folder structure replication" never happened. Sanitize each
+        // PATH SEGMENT separately and re-join with the directory separator.
+        var segments = rel.Split('/')
+            .Select(seg => string.Join("_", seg.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)))
+            .Where(seg => seg.Length > 0 && seg != "." && seg != "..")
+            .ToArray();
+        rel = string.Join(Path.DirectorySeparatorChar.ToString(), segments);
         if (!string.IsNullOrEmpty(query))
         {
             // resource with query string: fold it into the name to avoid collisions
@@ -301,6 +367,65 @@ public sealed class GrabberService
     }
 
     internal static Uri Clean(Uri u) => new(u.GetLeftPart(UriPartial.Path));
+
+    // ---- v1.8.0 IDM Grabber wizard helpers (pure, tested) ------------------
+
+    /// <summary>"www.tonec.com" → "tonec.com" (≥3 labels strips the first).
+    /// Simple honest heuristic — no Public Suffix List; "co.uk" style TLDs keep
+    /// their second label ("bbc.co.uk" stays "bbc.co.uk").</summary>
+    public static string RegistrableDomain(string host)
+    {
+        var labels = host.Split('.');
+        return labels.Length > 2 ? string.Join(".", labels.Skip(1)) : host;
+    }
+
+    /// <summary>host equals the boundary or is a subdomain of it.</summary>
+    public static bool IsOnSite(string host, string boundary, GrabberOptions opts)
+        => host.Equals(boundary, StringComparison.OrdinalIgnoreCase)
+           || (opts.ExploreSubdomains && host.EndsWith("." + boundary, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Directory part of a page URL path, always slash-terminated
+    /// ("/support/index.html" → "/support/"; "/" → "/").</summary>
+    public static string RootDirectory(Uri page)
+    {
+        var path = page.AbsolutePath;
+        var lastSlash = path.LastIndexOf('/');
+        return lastSlash <= 0 ? "/" : path[..(lastSlash + 1)];
+    }
+
+    /// <summary>IDM "don't explore parent directories": the link must stay at or
+    /// below the start page's directory (same host only).</summary>
+    public static bool IsUnderDirectory(Uri link, string directory)
+        => link.AbsolutePath.StartsWith(directory, StringComparison.OrdinalIgnoreCase)
+           || link.AbsolutePath.TrimEnd('/') + "/" == directory; // the start page itself
+
+    /// <summary>Crawl acceptance for one candidate page (v1.8.0 IDM step-3 rules).</summary>
+    public static bool ShouldExplore(Uri clean, Uri root, string boundary, string startDir,
+        GrabberOptions opts, int externalHops)
+    {
+        if (IsOnSite(clean.Host, boundary, opts))
+        {
+            // "Don't explore parent directories" applies to the START host only
+            if (!opts.ExploreParentDirectories
+                && clean.Host.Equals(root.Host, StringComparison.OrdinalIgnoreCase)
+                && !IsUnderDirectory(clean, startDir))
+                return false;
+            return true;
+        }
+        // other sites: separate level budget ("levels to process on other sites")
+        return externalHops < opts.ExternalDepth;
+    }
+
+    /// <summary>Size gate for grabber files: known lengths are compared to the
+    /// limits; unknown lengths (≤0) always pass the up-front check (the copy loop
+    /// enforces MaxBytes on the fly).</summary>
+    public static bool PassesSizeFilter(long contentLength, long minBytes, long maxBytes)
+    {
+        if (contentLength <= 0) return true;
+        if (minBytes > 0 && contentLength < minBytes) return false;
+        if (maxBytes > 0 && contentLength > maxBytes) return false;
+        return true;
+    }
 
     private sealed class UriComparer : IEqualityComparer<Uri>
     {

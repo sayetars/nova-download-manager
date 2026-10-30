@@ -565,6 +565,12 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
                         IncludeFilter = req.IncludeFilter, ExcludeFilter = req.ExcludeFilter,
                         SaveDirectory = string.IsNullOrWhiteSpace(req.SaveDirectory)
                             ? Path.Combine(_downloadsDir, "grabber") : req.SaveDirectory,
+                        // v1.8.0 (IDM Grabber wizard step 3+4 parity)
+                        ExploreParentDirectories = req.ExploreParentDirectories,
+                        ExploreSubdomains = req.ExploreSubdomains,
+                        ExternalDepth = Math.Clamp(req.ExternalDepth, 0, 10),
+                        MinBytes = Math.Clamp(req.MinBytes, 0, long.MaxValue),
+                        MaxBytes = Math.Clamp(req.MaxBytes, 0, long.MaxValue),
                     };
                     var runId = Guid.NewGuid().ToString("N");
                     _ = Task.Run(async () =>
@@ -587,6 +593,34 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
 
                 case "grabber_status":
                     return Envelope.Ok(id, new { runs = _grabberStatus.Select(kv => new { run_id = kv.Key, kv.Value.PagesDone, kv.Value.PagesQueued, kv.Value.FilesDone, kv.Value.BytesDone, kv.Value.Current }) });
+
+                // v1.8.0 (IDM login-dialog parity): credentials from the UI auth dialog
+                case "provide_auth":
+                {
+                    var req = env.PayloadAs<ProvideAuthRequest>() ?? new();
+                    if (string.IsNullOrWhiteSpace(req.TaskKey) || string.IsNullOrWhiteSpace(req.UserName))
+                        return Envelope.Error(id, "bad_request", "protocol", "task_key and user are required.");
+                    var ok = _engine.ProvideAuth(req.TaskKey, req.UserName, req.Password);
+                    if (ok && req.SaveToVault)
+                    {
+                        var url = _engine.Get(req.TaskKey)?.Url;
+                        if (!string.IsNullOrEmpty(url) && Uri.TryCreate(url, UriKind.Absolute, out var u))
+                            _vault.Save(u.Host, "", req.UserName, req.Password);
+                    }
+                    return ok ? Envelope.Ok(id, new { resumed = true })
+                              : Envelope.Error(id, "not_found", "state", "task not found.");
+                }
+
+                // v1.8.0 (IDM "run at Windows startup" parity)
+                case "get_autostart":
+                    return Envelope.Ok(id, new { enabled = AutoStartState() });
+
+                case "set_autostart":
+                {
+                    var req = env.PayloadAs<SetAutostartRequest>() ?? new();
+                    SetAutoStart(req.Enabled);
+                    return Envelope.Ok(id, new { enabled = AutoStartState() });
+                }
 
                 case "grabber_projects":
                     return Envelope.Ok(id, new { projects = _grabber.ListProjects() });
@@ -1273,4 +1307,14 @@ public sealed class IpcMessageRouter : IIpcMessageHandler
             return cmd.ExecuteNonQuery();
         }
     }
+
+    // ---- v1.8.0 (IDM "Automatic startup" / run-at-login parity) ----------------
+
+    /// <summary>Windows: HKCU Run key (user-level, no admin). Linux: XDG autostart
+    /// .desktop for the engine. macOS: login items are a System Settings action —
+    /// reported honestly as not-registered rather than faked.</summary>
+    private static bool AutoStartState() => AutoStartRegister.IsEnabled();
+
+    private static void SetAutoStart(bool enabled)
+        => AutoStartRegister.Set(enabled, Environment.ProcessPath ?? "NovaEngine");
 }

@@ -359,6 +359,28 @@ abstract class S {
   String get postActionHibernate;
   String get postActionSleep;
   String get postActionLogoff;
+
+  // ---- v1.8.0 IDM full-parity completion --------------------------------
+  String get postActionOpenFile;
+  String get postActionOpenPath;
+  String get queueOptions;
+  String get queueRetries;
+  String get queuePostAction;
+  String get loginRequired;
+  String get loginRequiredFor;
+  String get rememberLogin;
+  String get ok;
+  String get chooseFields;
+  String get fieldQueue;
+  String get fieldCategory;
+  String get fieldDate;
+  String get autostartEngine;
+  String get autostartEngineHint;
+  String get grabParents;
+  String get grabSubdomains;
+  String get grabExternalDepth;
+  String get grabMinSizeKb;
+  String get grabMaxSizeKb;
   String get categoriesEditor;
   String get addCategory;
   String get patterns;
@@ -694,6 +716,28 @@ class EnStrings implements S {
   @override String get postActionHibernate => 'Hibernate';
   @override String get postActionSleep => 'Sleep';
   @override String get postActionLogoff => 'Log off';
+
+  // ---- v1.8.0 IDM full-parity completion --------------------------------
+  @override String get postActionOpenFile => 'Open a file / run a program';
+  @override String get postActionOpenPath => 'File or program to open (e.g. C:\\done\\notify.bat)';
+  @override String get queueOptions => 'Queue options';
+  @override String get queueRetries => 'Number of retries for each file';
+  @override String get queuePostAction => 'When this queue finishes';
+  @override String get loginRequired => 'Login required';
+  @override String get loginRequiredFor => 'This download needs a username and password';
+  @override String get rememberLogin => 'Remember this login for the site';
+  @override String get ok => 'OK';
+  @override String get chooseFields => 'Shown info fields';
+  @override String get fieldQueue => 'Queue';
+  @override String get fieldCategory => 'Category';
+  @override String get fieldDate => 'Date';
+  @override String get autostartEngine => 'Start with the system';
+  @override String get autostartEngineHint => 'Runs the download engine in the background at login';
+  @override String get grabParents => 'Explore parent folders';
+  @override String get grabSubdomains => 'Whole domain (incl. subdomains)';
+  @override String get grabExternalDepth => 'Levels on other sites';
+  @override String get grabMinSizeKb => 'Min size (KB)';
+  @override String get grabMaxSizeKb => 'Max size (KB)';
   @override String get categoriesEditor => 'Categories';
   @override String get addCategory => 'Add category';
   @override String get patterns => 'Patterns';
@@ -1112,6 +1156,28 @@ class FaStrings implements S {
   @override String get postActionHibernate => 'هایبرنیت';
   @override String get postActionSleep => 'خواب';
   @override String get postActionLogoff => 'خروج از حساب';
+
+  // ---- v1.8.0 IDM full-parity completion --------------------------------
+  @override String get postActionOpenFile => 'بازکردن فایل / اجرای برنامه';
+  @override String get postActionOpenPath => 'فایل یا برنامهٔ موردنظر (مثلاً C:\\done\\notify.bat)';
+  @override String get queueOptions => 'گزینه‌های صف';
+  @override String get queueRetries => 'تعداد تلاش دوباره برای هر فایل';
+  @override String get queuePostAction => 'پایان این صف';
+  @override String get loginRequired => 'نیاز به ورود';
+  @override String get loginRequiredFor => 'این دانلود به نام کاربری و گذرواژه نیاز دارد';
+  @override String get rememberLogin => 'این ورود را برای سایت به خاطر بسپار';
+  @override String get ok => 'تأیید';
+  @override String get chooseFields => 'فیلدهای نمایشی';
+  @override String get fieldQueue => 'صف';
+  @override String get fieldCategory => 'دسته';
+  @override String get fieldDate => 'تاریخ';
+  @override String get autostartEngine => 'اجرا با سیستم';
+  @override String get autostartEngineHint => 'موتور دانلود هنگام ورود به سیستم در پس‌زمینه اجرا شود';
+  @override String get grabParents => 'پوشه‌های بالاتر';
+  @override String get grabSubdomains => 'کل دامنه (با زیردامنه‌ها)';
+  @override String get grabExternalDepth => 'سطح‌ها در سایت‌های دیگر';
+  @override String get grabMinSizeKb => 'کمینهٔ حجم (KB)';
+  @override String get grabMaxSizeKb => 'بیشینهٔ حجم (KB)';
   @override String get categoriesEditor => 'دسته‌بندی‌ها';
   @override String get addCategory => 'افزودن دسته';
   @override String get patterns => 'الگوها';
@@ -1232,7 +1298,7 @@ class FaStrings implements S {
   @override String get extractDone => 'استخراج تمام شد: {m}';
   @override String get convertDone => 'تبدیل تمام شد: {m}';
   @override String get convertFailed => 'تبدیل ناموفق: {m}';
-  @override String get sourcesCount => '{n
+  @override String get sourcesCount => '{n} منبع';
   // ----- v1.8.0 (IDM full-parity round)
   @override String get proxyMode => 'حالت پراکسی';
   @override String get proxyManual => 'دستی';
@@ -1259,5 +1325,4 @@ class FaStrings implements S {
   @override String get updateAutoCheck => 'بررسی خودکار به‌روزرسانی (ساعت، ۰ = خاموش)';
   @override String get saveTo => 'ذخیره در (اختیاری)';
   @override String get updateAvailableMsg => 'نسخهٔ جدیدی از نوا در دسترس است';
-} منبع';
 }

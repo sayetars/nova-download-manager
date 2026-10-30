@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <shellapi.h>
+#include <shlwapi.h>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "nova_pipe_bridge.h"
@@ -68,6 +69,31 @@ bool FlutterWindow::OnCreate() {
         }
       });
 
+  // v1.8.0 (IDM "drag files out of the app" parity): "nova/dragout" — start
+  // with a single file path (or a list) begins a native OLE drag (CF_HDROP).
+  dragout_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "nova/dragout",
+      &flutter::StandardMethodCodec::instance());
+  dragout_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() == "start") {
+          std::vector<std::wstring> files;
+          const auto* args = std::get_if<flutter::EncodableList>(call.arguments());
+          if (args) {
+            for (const auto& a : *args)
+              if (const auto* s = std::get_if<std::string>(&a))
+                files.push_back(Utf8ToWide(*s));
+          } else if (const auto* single = std::get_if<std::string>(call.arguments())) {
+            files.push_back(Utf8ToWide(*single));
+          }
+          const DWORD effect = DragOutFiles(files);
+          result->Success(flutter::EncodableValue(static_cast<int32_t>(effect)));
+        } else {
+          result->NotImplemented();
+        }
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -85,6 +111,7 @@ void FlutterWindow::OnDestroy() {
   pipe_bridge_.reset();
   dnd_channel_.reset();
   tray_channel_.reset();
+  dragout_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -205,4 +232,150 @@ void FlutterWindow::TrayInvoke(const char* method) {
   if (tray_channel_) {
     tray_channel_->InvokeMethod(method, nullptr);
   }
+}
+
+// ---- v1.8.0 (IDM "drag downloaded files out of the app" parity) --------------
+// Minimal OLE drag source: CF_HDROP data object + IDropSource, driven by
+// DoDragDrop (runs the modal loop; the Dart call resolves when the drag ends).
+
+namespace {
+
+std::wstring Utf8ToWideLocal(const std::string& s) {
+  if (s.empty()) return std::wstring();
+  int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+  std::wstring w(len > 0 ? len - 1 : 0, L'\0');
+  if (len > 0) MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), len);
+  return w;
+}
+
+class NovaDropSource : public IDropSource {
+  LONG ref_ = 1;
+
+ public:
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+    if (!ppv) return E_POINTER;
+    if (riid == IID_IUnknown || riid == IID_IDropSource) {
+      *ppv = static_cast<IDropSource*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *ppv = nullptr;
+    return E_NOINTERFACE;
+  }
+  ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&ref_); }
+  ULONG STDMETHODCALLTYPE Release() override {
+    ULONG r = InterlockedDecrement(&ref_);
+    if (r == 0) delete this;
+    return r;
+  }
+  HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL escape, DWORD keys) override {
+    if (escape) return DRAGDROP_S_CANCEL;
+    if (!(keys & MK_LBUTTON)) return DRAGDROP_S_DROP;
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD) override {
+    return DRAGDROP_S_USEDEFAULTCURSORS;
+  }
+};
+
+class NovaHdropDataObject : public IDataObject {
+  LONG ref_ = 1;
+  HGLOBAL block_ = nullptr;  // DROPFILES + double-null-terminated wide paths
+
+  static HGLOBAL BuildDropFiles(const std::vector<std::wstring>& files) {
+    size_t chars = 2;  // final double NUL
+    for (const auto& f : files) chars += f.size() + 1;
+    const size_t bytes = sizeof(DROPFILES) + chars * sizeof(wchar_t);
+    HGLOBAL g = GlobalAlloc(GHND, bytes);
+    if (!g) return nullptr;
+    auto* df = static_cast<DROPFILES*>(GlobalLock(g));
+    if (!df) {
+      GlobalFree(g);
+      return nullptr;
+    }
+    df->pFiles = sizeof(DROPFILES);
+    df->fWide = TRUE;
+    auto* out = reinterpret_cast<wchar_t*>(reinterpret_cast<BYTE*>(df) + sizeof(DROPFILES));
+    for (const auto& f : files) {
+      wcscpy_s(out, f.size() + 1, f.c_str());
+      out += f.size() + 1;
+    }
+    *out = L'\0';  // list terminator
+    GlobalUnlock(g);
+    return g;
+  }
+
+ public:
+  explicit NovaHdropDataObject(const std::vector<std::wstring>& files)
+      : block_(BuildDropFiles(files)) {}
+  ~NovaHdropDataObject() {
+    if (block_) GlobalFree(block_);
+  }
+
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+    if (!ppv) return E_POINTER;
+    if (riid == IID_IUnknown || riid == IID_IDataObject) {
+      *ppv = static_cast<IDataObject*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *ppv = nullptr;
+    return E_NOINTERFACE;
+  }
+  ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&ref_); }
+  ULONG STDMETHODCALLTYPE Release() override {
+    ULONG r = InterlockedDecrement(&ref_);
+    if (r == 0) delete this;
+    return r;
+  }
+
+  HRESULT STDMETHODCALLTYPE GetData(FORMATETC* fmt, STGMEDIUM* medium) override {
+    if (!fmt || !medium) return E_INVALIDARG;
+    if (fmt->cfFormat != CF_HDROP || fmt->tymed != TYMED_HGLOBAL) return DV_E_FORMATETC;
+    const SIZE_T bytes = GlobalSize(block_);
+    medium->hGlobal = GlobalAlloc(GHND, bytes);
+    if (!medium->hGlobal) return E_OUTOFMEMORY;
+    memcpy(GlobalLock(medium->hGlobal), GlobalLock(block_), bytes);
+    GlobalUnlock(medium->hGlobal);
+    GlobalUnlock(block_);
+    medium->tymed = TYMED_HGLOBAL;
+    medium->pUnkForRelease = nullptr;
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC*, STGMEDIUM*) override { return E_NOTIMPL; }
+  HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* fmt) override {
+    return (fmt && fmt->cfFormat == CF_HDROP && fmt->tymed == TYMED_HGLOBAL) ? S_OK : DV_E_FORMATETC;
+  }
+  HRESULT STDMETHODCALLTYPE GetCanonicalFormatEtc(FORMATETC*, FORMATETC*) override { return E_NOTIMPL; }
+  HRESULT STDMETHODCALLTYPE SetData(FORMATETC*, STGMEDIUM*, BOOL) override { return E_NOTIMPL; }
+  HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD direction, IEnumFORMATETC** pp) override {
+    if (!pp) return E_POINTER;
+    if (direction != DATADIR_GET) return E_NOTIMPL;
+    static FORMATETC supported = {CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    return SHCreateStdEnumFmtEtc(1, &supported, pp);
+  }
+  HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC*, DWORD, IAdviseSink*, DWORD*) override { return OLE_E_ADVISENOTSUPPORTED; }
+  HRESULT STDMETHODCALLTYPE DUnadvise(DWORD) override { return OLE_E_ADVISENOTSUPPORTED; }
+  HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA**) override { return OLE_E_ADVISENOTSUPPORTED; }
+};
+
+}  // namespace
+
+std::wstring FlutterWindow::Utf8ToWide(const std::string& s) { return Utf8ToWideLocal(s); }
+
+bool FlutterWindow::DragOutFiles(const std::vector<std::wstring>& files) {
+  if (files.empty()) return false;
+  // The runner main() has OleInitialize'd the STA thread; DoDragDrop needs it.
+  auto* data = new (std::nothrow) NovaHdropDataObject(files);
+  auto* source = new (std::nothrow) NovaDropSource();
+  if (!data || !source) {
+    if (data) data->Release();
+    if (source) source->Release();
+    return false;
+  }
+  DWORD effect = DROPEFFECT_NONE;
+  const HRESULT hr = DoDragDrop(data, source, DROPEFFECT_COPY, &effect);
+  data->Release();
+  source->Release();
+  return SUCCEEDED(hr) && effect == DROPEFFECT_COPY;
 }

@@ -2,6 +2,41 @@
 
 All notable changes to Nova Download Manager. Format follows Keep a Changelog; versioning is semantic (product pre-1.0 parity is intentional).
 
+## [1.8.0] — 2026-10-30
+
+**The IDM full-parity completion round** (user directive: «میخوام راجب قابلیت ها و امکانات internet download manager عمیق تحقیق و جست جو کنی و همه شون رو توی برنامه خودمون پیاده کنی» — deeply research every Internet Download Manager capability and implement them all). Fresh primary-source research (official IDM features/options/scheduler/grabber/command-line pages) was turned into a refreshed parity matrix (`docs/IDM-PARITY.md`), then every remaining implementable row was closed. C# **320/320 tests** (+78), Flutter 13 tests + **0 analyze errors** (the previously committed v1.8.0-start code had never compiled — fixed), both audits PASS.
+
+### Added — IDM parity completions (the headline)
+- **PAC proxy auto-config** (`proxy.mode=pac` + `proxy.pac_url`): Jint (MIT) evaluation with the full standard PAC helper environment (`shExpMatch`, `isInNet`, `dnsResolve`, …), malformed-token skipping per the PAC contract, per-scheme+host caching, bypass wildcards, proxy auth — wired into every engine-side HttpClient. Settings gains a **live Test button** and a **Get System** detector (Windows registry / gsettings / macOS scutil, PAC URL pickup included). Closes KNOWN-LIMITATIONS #18.
+- **Interactive login dialog for 401/407** (IDM's hallmark): the engine retries auth at BOTH probe and slice stage with vault or per-task credentials; a task that still lacks credentials fails with `auth_required`, the UI pops a username/password dialog (`provide_auth` IPC) with *remember for this site* and re-prompts on rejection. Closes #6.
+- **Vault URL-prefix entries** — IDM's "different logins for different directories of the same site": `host/path` entries win by longest prefix over plain-host entries.
+- **Per-queue Scheduler options** (IDM Scheduler dialog): *Number of retries for each file* (`queue.max_retries.<name>` seeds new tasks) and **"Open the following file when done"** (`queue.post_action.<name>` = `open:<path>` — documents, .exe or IDM's .bat multi-program trick — or any power action), fired on the queue's active→idle transition.
+- **Lone-task infinite retry** (IDM: "retries infinitely with 30 seconds interval when the file is alone in the queue"): retryable failures of the only remaining task in a queue keep retrying every 30 s (`engine.lone_infinite_retry`, default on; non-retryable errors still fail immediately — deliberately smarter than IDM).
+- **Grabber wizard step 3+4 options**: "Don't explore parent directories" (default, IDM-like), "Explore all sites within the main domain" (registrable-domain boundary + subdomains), separate **levels for other sites**, and **min/max file-size filters** (unknown lengths enforced during the copy).
+- **HTTP/2 downloading** (beyond IDM 6.42): every https request offers h2 via ALPN with 1.1 fallback (`engine.http2`, live toggle) — multiplexed streams reuse connections the way IDM's "reuse available connections" intends.
+- **Windows tray**: `Shell_NotifyIconW` + menu (Open/Exit) + close-to-tray (`ui.minimize_to_tray`) via the "nova/tray" channel.
+- **Drag downloaded files OUT of the app** (Windows): OLE `DoDragDrop` + `CF_HDROP` on the "nova/dragout" channel — press a completed tile's category icon and move; drops into Explorer, e-mail, chats.
+- **Insert special key** (IDM's own default) for force/prevent interception in both extensions, tracked via keydown/keyup state (non-modifier keys have no click flags); options page updated.
+- **Per-event sounds** with custom files + platform default cues (complete / error / all-done) and a per-event Test button.
+- **Progress-view modes** (IDM Downloads tab): always open details / stay in list / never (`ui.progress_dialog`).
+- **Shown-fields chooser** (IDM's column list, card-UI equivalent): queue / category / date chips in the tiles (`ui.tile_fields`).
+- **Autostart with the OS** (IDM "Automatic startup"): `get/set_autostart` IPC — Windows HKCU Run key, Linux XDG autostart .desktop; Settings toggle reflecting real OS state.
+- **Weekly auto update check** honouring `update.auto_check_hours` (168 = IDM's once-a-week) in addition to the manual check.
+- **Save As directory in the Add dialog** — empty keeps the category default; a custom dir can become the category's new default ("change folder on last selected", `ui.remember_category_dir`, on by default) via `CategoryDirStore` + `update_category_dir` IPC.
+- **"Ignore file modification time changes when resuming"** (IDM Downloads tab): `engine.resume_ignore_validator_change` resumes old bytes when only the validator changed.
+
+### Fixed — bugs found by the new test suite
+- **Multi-segment resume silently restarted from zero since v1.1.0** — the persisted-plan check summed absolute offsets instead of lengths, so every multi-segment resume was judged "plan mismatch" and re-downloaded (correct bytes, wasted bandwidth). Now: lengths must cover [0, size).
+- **Grabber result counters were never populated** — `GrabberResult.FilesDone/BytesDone` stayed 0 (the locals were only persisted to the project row).
+- **Grabber "folder structure replication" never happened** — `'/'` is in `GetInvalidFileNameChars` on every OS, so paths flattened to `support_pic.png`; segments are now sanitized individually and re-joined with the directory separator.
+- **The committed-but-uncompiled v1.8.0-start code** (fdba99f, written after the environment reset had wiped the toolchain): FA `sourcesCount` string corruption, missing `dart:ui`/`SoundPlayer` imports, and a `didRequestAppExit` signature mismatch — all fixed; the tree now analyzes and tests clean.
+
+### Changed
+- `docs/IDM-PARITY.md` — full audit refresh against fresh official-source research; matrix renumbered and extended to 63 rows, every implementable row now HAVE.
+- `docs/KNOWN-LIMITATIONS.md` — #6/#18 closed, #8/#10 updated (Windows tray shipped; Insert added), new §39 documents the parity-completion semantics (lone-retry default, post-action timing, autostart scope, domain heuristic).
+- `THIRD-PARTY-NOTICES.md` — Jint (MIT, $0) recorded for PAC.
+- Engine test count 242 → **320** (V180 completion suite: auth prompt, vault prefixes, queue retry, post actions, grabber rules + E2E).
+
 ## [1.7.1] — 2026-10-29
 
 **The free-forever round** (user directive: «برنامه نباید برای هیچ قسمتیش نیاز ب پرداخت هزینه باشه» — the program must not require payment for any part). Nova now carries a hard, CI-enforced guarantee that no part of it — present or future — requires payment. C# 242/242, Flutter 13 + 0 analyze errors, both audits PASS, Linux tarball + Windows engine zip + extension zips rebuilt at 1.7.1, bundle smoke + clean-env tarball PASS.

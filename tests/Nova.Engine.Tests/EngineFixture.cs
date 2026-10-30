@@ -18,17 +18,21 @@ public sealed class EngineFixture : IAsyncDisposable
     { Timeout = Timeout.InfiniteTimeSpan };
 
     public EngineFixture(bool withScheduler = false, int maxConcurrent = 3, string? existingDataDir = null,
-        Nova.Engine.IMediaPipeline? media = null)
+        Nova.Engine.IMediaPipeline? media = null, LoginVault? vault = null)
     {
         DataDir = existingDataDir ?? Path.Combine(Path.GetTempPath(), "nova-tests-" + Guid.NewGuid().ToString("N"));
         DownloadsDir = Path.Combine(DataDir, "downloads");
         Directory.CreateDirectory(DownloadsDir);
         Db = new NovaDatabase(Path.Combine(DataDir, "nova.db"));
+        Vault = vault;
         Engine = new DownloadEngine(
             new DownloadTaskRepository(Db), new SegmentRepository(Db),
             new QueueRepository(Db), new SettingsRepository(Db), Bus,
-            Http, DownloadsDir, 4, media);
+            Http, DownloadsDir, 4, media, vault);
     }
+
+    /// <summary>v1.8.0: optional login vault wired into the engine (auth tests).</summary>
+    public LoginVault? Vault { get; }
 
     public static Task<EngineFixture> CreateAsync(Nova.Engine.IMediaPipeline? media = null) => Task.FromResult(new EngineFixture(media: media));
 

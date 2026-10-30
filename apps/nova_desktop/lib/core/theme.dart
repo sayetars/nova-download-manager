@@ -190,6 +190,15 @@ class Fmt {
     final v = (p * 100).clamp(0, 100).toStringAsFixed(p >= 0.999 ? 0 : 1);
     return '$v%'.translateDigits(Localizations.localeOf(context).toString());
   }
+
+  /// v1.8.0 (column-chooser "date" field): short local date for a task tile.
+  static String date(BuildContext context, int epochMs) {
+    if (epochMs <= 0) return '';
+    final d = DateTime.fromMillisecondsSinceEpoch(epochMs);
+    final out =
+        '${d.year}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}';
+    return out.translateDigits(Localizations.localeOf(context).toString());
+  }
 }
 
 extension _DigitLocalize on String {

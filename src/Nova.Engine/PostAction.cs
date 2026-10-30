@@ -16,15 +16,52 @@ public static class PostActionRunner
     public const string Hibernate = "hibernate";
     public const string Sleep = "sleep";
     public const string LogOff = "logoff";
+    /// <summary>v1.8.0 (IDM Scheduler parity): "Open the following file when done" —
+    /// encoded as <c>open:&lt;path&gt;</c>. The path may be a document (opens with the
+    /// default application), an executable, or a .bat/.cmd script (IDM documents the
+    /// .bat trick for running several programs).</summary>
+    public const string OpenPrefix = "open:";
 
     public static readonly string[] All = { None, ExitEngine, Shutdown, Hibernate, Sleep, LogOff };
 
-    public static bool IsValid(string action) => All.Contains(action);
+    public static bool IsValid(string action)
+        => All.Contains(action) || IsOpen(action ?? "");
+
+    /// <summary>True for a well-formed <c>open:&lt;path&gt;</c> action with a non-empty target.</summary>
+    public static bool IsOpen(string action)
+        => action.StartsWith(OpenPrefix, StringComparison.OrdinalIgnoreCase)
+           && action.Trim().Length > OpenPrefix.Length;
+
+    /// <summary>The path of an <c>open:</c> action (trimmed); empty otherwise.</summary>
+    public static string OpenTarget(string action)
+        => IsOpen(action) ? action[OpenPrefix.Length..].Trim() : "";
+
+    /// <summary>Pure builder (testable): the process start for an open action.
+    /// Documents/bat/exe open via the shell so file associations apply.</summary>
+    public static ProcessStartInfo BuildOpenStartInfo(string target) => new(target)
+    {
+        UseShellExecute = true,
+    };
 
     /// <summary>Executes the action. Engine exit is requested via callback so the host can shut down cleanly.</summary>
     public static void Execute(string action, Action requestEngineExit, Action<string>? log = null)
     {
         var line = log ?? (_ => { });
+        if (IsOpen(action))
+        {
+            var target = OpenTarget(action);
+            line($"PostAction: opening '{target}'.");
+            try
+            {
+                using var p = Process.Start(BuildOpenStartInfo(target));
+                if (p is not null && !p.WaitForExit(60_000)) p.Kill();
+            }
+            catch (Exception ex)
+            {
+                EngineLog.Warn($"PostAction open failed: {ex.Message}");
+            }
+            return;
+        }
         switch (action)
         {
             case None:

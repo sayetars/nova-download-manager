@@ -52,6 +52,13 @@ class FlutterWindow : public Win32Window {
   void TrayRemove();
   void TrayShowMenu();
   void TrayInvoke(const char* method);
+
+  // v1.8.0 (IDM "drag downloaded files out of the app" parity): OLE drag
+  // source on the "nova/dragout" channel. DoDragDrop with CF_HDROP starts a
+  // native shell drag (copy to Explorer, e-mail attachments, etc.).
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> dragout_channel_;
+  bool DragOutFiles(const std::vector<std::wstring>& files);
+  static std::wstring Utf8ToWide(const std::string& s);
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

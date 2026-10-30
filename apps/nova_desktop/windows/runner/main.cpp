@@ -14,8 +14,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   // Initialize COM, so that it is available for use in the library and/or
-  // plugins.
-  ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  // plugins. v1.8.0: OleInitialize (superset of STA CoInitializeEx) so the OLE
+  // drag source ("drag a downloaded file out to Explorer", IDM parity) works.
+  ::OleInitialize(nullptr);
 
   flutter::DartProject project(L"data");
 

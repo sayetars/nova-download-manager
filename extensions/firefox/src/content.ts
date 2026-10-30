@@ -6,7 +6,7 @@
  *   chosen download to the engine via the background service worker.
  */
 
-import { callBackground, MediaCandidate, siteAllowed, loadSettings, ExtSettings, keyMatches } from '../../shared/protocol';
+import { callBackground, MediaCandidate, siteAllowed, loadSettings, ExtSettings, keyMatches, keyHeldForClick } from '../../shared/protocol';
 import { scanPlayers, watchDrm } from '../../shared/video-detect';
 import { NovaOverlay } from '../../shared/overlay';
 
@@ -255,10 +255,14 @@ browser.runtime.onMessage.addListener((msg: { type?: string }) => {
 // ---- IDM parity v1.2.0: special keys ------------------------------------------------
 // interceptKey: hold while clicking a link → force download with Nova.
 // preventKey: hold → Nova overlay + interception suppressed (checked each refresh).
+// v1.8.0: 'insert' (IDM's default) — a non-modifier key has no flag on click
+// events, so its held state is tracked from keydown/keyup here.
 let preventHeld = false;
+let insertHeld = false;
 document.addEventListener(
   'keydown',
   (e) => {
+    if (e.key === 'Insert' || e.code === 'Insert') insertHeld = true;
     if (settings?.preventKey && settings.preventKey !== 'none' && keyMatches(e, settings.preventKey)) preventHeld = true;
   },
   true,
@@ -266,18 +270,19 @@ document.addEventListener(
 document.addEventListener(
   'keyup',
   (e) => {
+    if (e.key === 'Insert' || e.code === 'Insert') insertHeld = false;
     if (settings?.preventKey && settings.preventKey !== 'none' && keyMatches(e, settings.preventKey)) preventHeld = false;
   },
   true,
 );
-window.addEventListener('blur', () => { preventHeld = false; });
+window.addEventListener('blur', () => { preventHeld = false; insertHeld = false; });
 
 document.addEventListener(
   'click',
   (e) => {
     if (e.defaultPrevented || preventHeld || !settings?.enabled) return;
     if (!settings.interceptKey || settings.interceptKey === 'none') return;
-    if (!keyMatches(e as unknown as KeyboardEvent, settings.interceptKey)) return;
+    if (!keyHeldForClick(e, settings.interceptKey, insertHeld)) return;
     const a = (e.target as HTMLElement | null)?.closest?.('a[href]');
     if (!a) return;
     e.preventDefault();

@@ -101,13 +101,44 @@ public sealed class LoginVault
         });
     }
 
-    /// <summary>Best entry for a host (exact match wins, then suffix match). Passwords unsealed only on demand.</summary>
+    /// <summary>
+    /// Best entry for a URL or host (exact host match wins, then suffix match).
+    /// v1.8.0 (IDM "Site Logins" parity — different logins for different directories
+    /// of the same site): an entry stored as "host/path" matches by URL prefix —
+    /// the LONGEST matching prefix wins over plain-host entries.
+    /// </summary>
     public VaultEntry? Find(string urlOrHost)
     {
         string host;
-        try { host = new Uri(urlOrHost).Host; } catch { host = urlOrHost; }
+        var isUrl = Uri.TryCreate(urlOrHost, UriKind.Absolute, out var uri);
+        host = isUrl ? uri.Host : urlOrHost;
         var all = List();
-        return all.FirstOrDefault(v => v.Host.Equals(host, StringComparison.OrdinalIgnoreCase))
+
+        // prefix entries ("example.com/private/") — longest URL-prefix match wins
+        VaultEntry? bestPrefix = null;
+        var bestLen = -1;
+        if (isUrl)
+        {
+            var noQuery = uri.GetLeftPart(UriPartial.Path);
+            foreach (var v in all)
+            {
+                if (!v.Host.Contains('/')) continue;
+                foreach (var scheme in new[] { "http://", "https://" })
+                {
+                    var prefix = scheme + v.Host.TrimEnd('/');
+                    if (noQuery.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                        && (noQuery.Length == prefix.Length || noQuery[prefix.Length] is '/' or '?')
+                        && v.Host.Length > bestLen)
+                    {
+                        bestPrefix = v;
+                        bestLen = v.Host.Length;
+                    }
+                }
+            }
+        }
+
+        return bestPrefix
+            ?? all.FirstOrDefault(v => v.Host.Equals(host, StringComparison.OrdinalIgnoreCase))
             ?? all.FirstOrDefault(v => host.EndsWith("." + v.Host, StringComparison.OrdinalIgnoreCase));
     }
 

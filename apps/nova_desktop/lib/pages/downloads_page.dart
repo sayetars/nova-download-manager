@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io' as io;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/drag_out.dart';
 import '../core/models.dart';
 import '../core/strings.dart';
 import '../core/theme.dart';
@@ -40,6 +42,12 @@ class DownloadsPage extends ConsumerWidget {
         final sortMode = ref.watch(prov.sortModeProvider);
         list = sortMode.apply(list);
         if (list.isEmpty) return _empty(context, s);
+        // v1.8.0 (IDM "choose columns" parity): optional info fields in the tiles.
+        final tileFields = (ref.watch(prov.settingsProvider)['ui.tile_fields'] ?? '')
+            .split(',')
+            .map((f) => f.trim())
+            .where((f) => f.isNotEmpty)
+            .toSet();
         return Column(
           children: [
             Padding(
@@ -50,6 +58,7 @@ class DownloadsPage extends ConsumerWidget {
                   const SizedBox(width: 6),
                   Text(s.downloaded, style: Theme.of(context).textTheme.bodySmall),
                   const Spacer(),
+                  _fieldsButton(context, ref, s, tileFields),
                   _sortButton(context, ref, s, sortMode),
                   if (filter.value == 'completed')
                     TextButton.icon(
@@ -69,6 +78,7 @@ class DownloadsPage extends ConsumerWidget {
                   final task = list[i];
                   return TaskTile(
                     task: task,
+                    tileFields: tileFields,
                     onOpen: task.state == 'completed' ? () => _open(context, ref, task) : null,
                   );
                 },
@@ -77,6 +87,41 @@ class DownloadsPage extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+
+  /// v1.8.0 (IDM "choose the columns to appear on the main window" parity):
+  /// pick which extra info fields the tiles show (queue / category / date).
+  Widget _fieldsButton(BuildContext context, WidgetRef ref, S s, Set<String> fields) {
+    final engine = ref.read(prov.engineProvider);
+    Future<void> toggle(String f) async {
+      final next = fields.contains(f) ? fields.difference({f}) : fields.union({f});
+      await engine?.call('set_settings', {
+        'values': {'ui.tile_fields': next.join(',')}
+      });
+    }
+
+    return PopupMenuButton<String>(
+      tooltip: s.chooseFields,
+      icon: const Icon(Icons.view_column_outlined, size: 19),
+      itemBuilder: (_) => [
+        CheckedPopupMenuItem(
+          value: 'queue',
+          checked: fields.contains('queue'),
+          child: Text(s.fieldQueue),
+        ),
+        CheckedPopupMenuItem(
+          value: 'category',
+          checked: fields.contains('category'),
+          child: Text(s.fieldCategory),
+        ),
+        CheckedPopupMenuItem(
+          value: 'date',
+          checked: fields.contains('date'),
+          child: Text(s.fieldDate),
+        ),
+      ],
+      onSelected: (f) => toggle(f),
     );
   }
 
@@ -179,7 +224,10 @@ class DownloadsPage extends ConsumerWidget {
 class TaskTile extends ConsumerWidget {
   final TaskUi task;
   final VoidCallback? onOpen;
-  const TaskTile({super.key, required this.task, this.onOpen});
+  /// v1.8.0: extra visible info fields (queue/category/date) — the card-UI
+  /// equivalent of IDM's column chooser.
+  final Set<String> tileFields;
+  const TaskTile({super.key, required this.task, this.onOpen, this.tileFields = const {}});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -198,7 +246,7 @@ class TaskTile extends ConsumerWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _categoryIcon(context),
+              _draggableIcon(context),
               const SizedBox(width: 13),
               Expanded(
                 child: Column(
@@ -253,6 +301,24 @@ class TaskTile extends ConsumerWidget {
                           Text('${task.segmentsDone}/${task.segmentsTotal}',
                               style: TextStyle(fontSize: 11.5, color: cs.onSurfaceVariant)),
                         ],
+                        // v1.8.0 (IDM column-chooser parity): optional fields
+                        if (tileFields.contains('queue')) ...[
+                          const SizedBox(width: 10),
+                          Icon(Icons.schedule_rounded, size: 12, color: cs.onSurfaceVariant),
+                          const SizedBox(width: 3),
+                          Text(task.queueName,
+                              style: TextStyle(fontSize: 11.5, color: cs.onSurfaceVariant)),
+                        ],
+                        if (tileFields.contains('category')) ...[
+                          const SizedBox(width: 10),
+                          Text(task.category,
+                              style: TextStyle(fontSize: 11.5, color: cs.onSurfaceVariant)),
+                        ],
+                        if (tileFields.contains('date') && task.createdAtMs > 0) ...[
+                          const SizedBox(width: 10),
+                          Text(Fmt.date(context, task.createdAtMs),
+                              style: TextStyle(fontSize: 11.5, color: cs.onSurfaceVariant)),
+                        ],
                         const Spacer(),
                         _actions(context, ref, tasks, s),
                       ],
@@ -264,6 +330,32 @@ class TaskTile extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+
+  /// v1.8.0 (IDM "drag & drop downloaded files out of IDM" parity): on a
+  /// completed task, press the category icon and move the pointer to start a
+  /// NATIVE drag with the file (Windows runner; no-op elsewhere).
+  Widget _draggableIcon(BuildContext context) {
+    final icon = _categoryIcon(context);
+    if (task.state != 'completed') return icon;
+    final path = task.destinationDir.isEmpty
+        ? null
+        : '${task.destinationDir}${io.Platform.pathSeparator}${task.fileName}';
+    if (path == null || task.fileName.isEmpty) return icon;
+    Offset? downAt;
+    return Listener(
+      onPointerDown: (e) => downAt = e.position,
+      onPointerMove: (e) {
+        final start = downAt;
+        if (start == null) return;
+        if ((e.position - start).distance > 6) {
+          downAt = null; // fire once per gesture
+          NovaDragOut.start([path]);
+        }
+      },
+      onPointerUp: (_) => downAt = null,
+      child: MouseRegion(cursor: SystemMouseCursors.grab, child: icon),
     );
   }
 

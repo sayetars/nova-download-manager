@@ -18,12 +18,18 @@ class _GrabberPageState extends ConsumerState<GrabberPage> {
   final _dir = TextEditingController();
   final _include = TextEditingController();
   final _exclude = TextEditingController();
+  final _minKb = TextEditingController();
+  final _maxKb = TextEditingController();
   int _depth = 3;
+  int _externalDepth = 0;
   bool _images = true;
   bool _css = true;
   bool _scripts = false;
   bool _video = false;
   bool _offline = true;
+  // v1.8.0 (IDM Grabber wizard step 3 parity)
+  bool _exploreParents = false;
+  bool _exploreSubdomains = false;
   bool _running = false;
   String? _lastRun;
 
@@ -33,6 +39,8 @@ class _GrabberPageState extends ConsumerState<GrabberPage> {
     _dir.dispose();
     _include.dispose();
     _exclude.dispose();
+    _minKb.dispose();
+    _maxKb.dispose();
     super.dispose();
   }
 
@@ -52,6 +60,16 @@ class _GrabberPageState extends ConsumerState<GrabberPage> {
         'scripts': _scripts,
         'video': _video,
         'rewrite_for_offline': _offline,
+        // v1.8.0 (IDM Grabber wizard steps 3+4)
+        'explore_parent_directories': _exploreParents,
+        'explore_subdomains': _exploreSubdomains,
+        'external_depth': _externalDepth,
+        'min_bytes': (double.tryParse(_minKb.text.trim()) ?? 0) > 0
+            ? (double.parse(_minKb.text.trim()) * 1024).round()
+            : 0,
+        'max_bytes': (double.tryParse(_maxKb.text.trim()) ?? 0) > 0
+            ? (double.parse(_maxKb.text.trim()) * 1024).round()
+            : 0,
       });
       if (mounted) {
         setState(() => _lastRun = runId);
@@ -118,8 +136,40 @@ class _GrabberPageState extends ConsumerState<GrabberPage> {
             FilterChip(label: Text(s.scripts), selected: _scripts, onSelected: (v) => setState(() => _scripts = v)),
             FilterChip(label: Text(s.grabVideo), selected: _video, onSelected: (v) => setState(() => _video = v)),
             FilterChip(label: Text(s.offlineRewrite), selected: _offline, onSelected: (v) => setState(() => _offline = v)),
+            // v1.8.0 (IDM Grabber wizard step 3)
+            FilterChip(label: Text(s.grabParents), selected: _exploreParents, onSelected: (v) => setState(() => _exploreParents = v)),
+            FilterChip(label: Text(s.grabSubdomains), selected: _exploreSubdomains, onSelected: (v) => setState(() => _exploreSubdomains = v)),
           ],
         ),
+        const SizedBox(height: 12),
+        // v1.8.0 (IDM Grabber wizard steps 3+4): levels on other sites + size limits
+        Row(children: [
+          SizedBox(
+            width: 170,
+            child: TextField(
+              keyboardType: TextInputType.number,
+              controller: TextEditingController(text: '$_externalDepth'),
+              decoration: InputDecoration(labelText: s.grabExternalDepth, border: const OutlineInputBorder()),
+              onSubmitted: (v) => setState(() => _externalDepth = int.tryParse(v) ?? 0),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              keyboardType: TextInputType.number,
+              controller: _minKb,
+              decoration: InputDecoration(labelText: s.grabMinSizeKb, border: const OutlineInputBorder()),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              keyboardType: TextInputType.number,
+              controller: _maxKb,
+              decoration: InputDecoration(labelText: s.grabMaxSizeKb, border: const OutlineInputBorder()),
+            ),
+          ),
+        ]),
         const SizedBox(height: 20),
         Row(children: [
           FilledButton.icon(

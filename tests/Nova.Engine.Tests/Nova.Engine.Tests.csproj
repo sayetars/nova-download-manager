@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\src\Nova.Scheduler\Nova.Scheduler.csproj" />
     <ProjectReference Include="..\..\src\Nova.Media\Nova.Media.csproj" />
     <ProjectReference Include="..\..\src\Nova.Ipc\Nova.Ipc.csproj" />
+    <ProjectReference Include="..\..\src\Nova.Grabber\Nova.Grabber.csproj" />
   </ItemGroup>
 
   <ItemGroup>

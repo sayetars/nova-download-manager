@@ -1,6 +1,6 @@
 # PROJECT-TREE — Nova Download Manager
-# version v1.7.1 · git 90d10a7 · 2026-10-29T20:17:07
-# exact file-set carried by the Dropbox source checkpoint (301 files, 2,406,677 bytes uncompressed)
+# version v1.8.0 · git fdba99f · 2026-10-30T16:09:49
+# exact file-set carried by the Dropbox source checkpoint (308 files, 2,555,856 bytes uncompressed)
 # (regenerate: python3 scripts/gen_project_tree.py)
 
 .env
@@ -38,9 +38,11 @@ apps/
         engine_client.dart
         models.dart
         protocol.dart
+        sound_player.dart
         strings.dart
         theme.dart
         torrent_meta.dart
+        tray.dart
       main.dart
       mini_app.dart
       pages/
@@ -265,9 +267,11 @@ src/
     IdmImport.cs
     Metalink.cs
     Nova.Engine.csproj
+    Pac.cs
     PostAction.cs
     Preview/
       PreviewServer.cs
+    Protocol.cs
     Proxy.cs
     QuotaTracker.cs
     Security/
@@ -277,6 +281,7 @@ src/
       ServerProfileService.cs
     SftpTask.cs
     SpeedMeter.cs
+    SystemProxy.cs
     TaskRunner.cs
     Torrent/
       Bencode.cs
@@ -320,6 +325,7 @@ src/
     MediaPipeline.cs
     Nova.Media.csproj
   Nova.Persistence/
+    CategoryDirStore.cs
     DhtPeerStoreDb.cs
     DownloadTaskRepository.cs
     LoginVault.cs
@@ -357,6 +363,7 @@ tests/
     V150Tests.cs
     V160Tests.cs
     V170Tests.cs
+    V180Tests.cs
 tools/
   dropbox/
     backup.py

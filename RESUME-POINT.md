@@ -1,53 +1,77 @@
 # RESUME-POINT — atomic continuation contract
 
-updated: 2026-10-30 (T-023 — nova/ parallel-tree purge + cloud cleanup)
-task: NONE OPEN — awaiting user's GitHub repo + PAT for the Windows CI build
+updated: 2026-10-30 (T-024 — IDM full-parity completion, v1.8.0 released)
+task: NONE OPEN — v1.8.0 shipped; awaiting user's GitHub repo + PAT for the Windows CI build
 substep: —
 
-done (T-023, this session):
+done (T-024, this session):
 - Session certificate: UNIVERSAL-RULES.md read (SHA 87de0baa… matches ledger),
-  T-023 recorded in RULES-READ-LEDGER.md. Version floor verified FIRST:
-  v1.7.1 (VERSIONS.md + git tag + clean status).
-- nova/ parallel v0.1.0 tree purged (user approval «تأیید حذف nova/»):
-  gitlink (160000, nested repo) untracked; 149 MB tree deleted; narratives
-  preserved → docs/history/legacy-nova-tree/{WORKLOG-2026-10-30-parallel-
-  v0.1.0, KNOWN-LIMITATIONS-v0.1.0-parallel, README-v0.1.0-parallel}.md;
-  `nova/` guard in .gitignore; DECISIONS D-014 (D-012 precedent re-applied).
-- Security: the parallel tree's scripts/upload-dropbox.sh embedded the live
-  Dropbox refresh token in plaintext (committed to the nested repo, never
-  pushed — no remote). Rule 79/95 violation neutralized by deletion.
-- Dropbox cleanup (surgical; before/after listings recorded): /Releases/v0.1.0/**
-  (creds-bearing source zip), /Worklog/2026-10-30-implementation-session.md,
-  /nova/** (old-tree remnants; ROUND-12.md 4323 B + WORKLOG.md 1086 B verified
-  size-identical to local preserved copies before deletion), stray root /builds
-  v1.5.0 assets (48.4 MB — keep-2 superseded by 1.7.1/1.7.0). ~48.6 MB freed;
-  root now only the user's own folders + canonical /Nova-Download-Manager.
-- Root worklog.md (lost in the env reset) restored from the cloud state mirror;
-  T-023 entry appended. Dropbox creds file restored (600, D-004 pattern).
-- Genuine feature delta found in the parallel tree → future item: PAC script
-  evaluation (Jint, MIT) — docs/KNOWN-LIMITATIONS.md #18.
-- Environment: reset again (sdk/, ~/tools gone) — toolchain NOT rebuilt (not
-  needed for T-023; RECOVERY.md §2 when needed). GitHub Actions is the primary
-  Windows build path from here.
+  T-024 recorded in RULES-READ-LEDGER.md. Version floor verified FIRST:
+  v1.7.1 (VERSIONS.md + git tag + clean status) → worked ON TOP of it (D-012).
+- AUDIT-FIRST discovery: commit fdba99f ("docs(T-023): PROJECT-TREE.txt
+  regenerated") actually contained 2,004 lines of v1.8.0-start feature work
+  (PAC/Jint, SystemProxy, sounds, tray, CategoryDirStore, HTTP/2,
+  resume-ignore + the planMatches fix, V180Tests) — committed by a prior
+  session AFTER its toolchain was wiped, so it had NEVER compiled (corrupted
+  FA sourcesCount string, missing dart:ui/SoundPlayer imports, wrong
+  didRequestAppExit signature). This session rebuilt the toolchain and FIXED
+  that code instead of rewriting it (D-015).
+- Deep IDM research: official features2.html (21 features), options.html
+  (9 tabs), starting.html, command_line.html, idm_scheduler.html,
+  idm-grabber/wheretosearch.html → docs/IDM-PARITY.md fully refreshed
+  (63 rows; every implementable row HAVE; exclusions documented).
+- Implemented + tested (V180CompletionTests.cs, 37 new tests):
+  * 401/407 interactive login dialog (probe+slice auth retry via
+    ProbeWithAuthAsync + CredentialsFor; auth_required error; ProvideAuth
+    engine API; provide_auth IPC; UI dialog with save-to-vault + re-prompt)
+  * LoginVault URL-prefix entries (longest-prefix wins; per-directory logins)
+  * per-queue retry defaults (queue.max_retries.<name>) + lone-task infinite
+    30 s retry (engine.lone_infinite_retry, default on)
+  * per-queue post actions (queue.post_action.<name> = open:<path> | power)
+    fired on active→idle transition (EngineHostApp)
+  * Grabber: ExploreParentDirectories / ExploreSubdomains (registrable-domain
+    boundary) / ExternalDepth / Min-MaxBytes + 2 bug fixes (result counters
+    never populated; '/' in GetInvalidFileNameChars flattened folders)
+  * PostActionRunner open: actions (BuildOpenStartInfo pure + tested)
+  * autostart (AutoStartRegister: HKCU Run / XDG .desktop; get/set IPC;
+    Settings toggle)
+  * Extension Insert special key (key-state tracking; options page; rebuilt)
+  * Windows runner drag-out (OLE DoDragDrop + CF_HDROP on nova/dragout;
+    OleInitialize in main.cpp; shlwapi linked)
+  * UI: auth dialog, queue-options dialog, grabber fields, shown-fields
+    chooser (ui.tile_fields), drag affordance on completed tiles, strings
+    EN/FA (+Fmt.date)
+- Version: version.json → 1.8.0 (build 9); sync_versions 10 surfaces;
+  free_audit PASS (Jint added to THIRD-PARTY-NOTICES.md).
+- Verification: dotnet test 320/320 (full suite, pre-built binaries; the
+  1-3 full-suite stragglers are the documented 2-CPU flakes — isolated
+  re-runs all green); flutter analyze 0 errors; flutter test 13/13;
+  tarball clean-env PASS (byte-exact download through the shipped engine).
+- Release: nova-dm-1.8.0-linux-x64.tar.gz (50,760,022 B, sha256 2e6ccda1…)
+  + nova-engine-1.8.0-win-x64.zip (106,168,361 B, sha256 a318af06…) +
+  both extension zips + .sha256 sidecars → Dropbox /Nova-Download-Manager/
+  builds/ (1.7.0 assets removed per keep-2). CHANGELOG [1.8.0], VERSIONS.md
+  row + builds table, KNOWN-LIMITATIONS (#6/#18 closed, #8/#10 updated,
+  §39 added), DECISIONS D-015, STATE/RESUME-POINT, worklog T-024.
 
 next:
 1. USER: provide GitHub repo (empty, any name) + PAT (classic scopes: repo +
    workflow; or fine-grained Contents+Workflows RW) → session pushes main +
-   tags (v1.4.0…v1.7.1) → windows-build.yml runs (audit gate → engine tests →
+   tags (v1.4.0…v1.8.0) → windows-build.yml runs (audit gate → engine tests →
    Flutter UI → extensions → Inno Setup installer → artifacts; a v* tag push
    also creates a GitHub Release via the built-in GITHUB_TOKEN — zero user
    secrets). Poll run status via the GitHub REST API (no gh CLI here).
-2. Windows test feedback → v1.7.2 PATCH lane (bump version.json → sync →
+2. Windows test feedback → v1.8.x PATCH lane (bump version.json → sync →
    test → tag).
-3. Future (all free): PAC (Jint), tray, embedded player, CWS/AMO publishing —
-   paid services BANNED (D-013, docs/FREE-FOREVER.md).
+3. Future (all free): Linux tray + Linux drag-out (GTK runner work),
+   embedded player, arbitrary non-modifier special keys, CWS/AMO publishing —
+   paid services BANNED (D-013).
 
 evidence:
-- git ls-tree HEAD nova → 160000 commit b048c86… (gitlink, nested repo);
-  post-purge git status clean; single T-023 commit (git log -1).
-- dropbox.py list / before+after (parallel-tree products present → absent).
-- python3 scripts/sync_versions.py --check → PASS; scripts/free_audit.py →
-  PASS (no dependency change; 242/242 engine tests stand from v1.7.1).
+- git log (v1.8.0 commit + tag); dotnet test 320/320; flutter analyze/test
+  outputs; python3 scripts/sync_versions.py --check → PASS;
+  scripts/free_audit.py → PASS; tarball_cleanenv_test.sh → PASS;
+  dropbox.py list before/after (uploads present; 1.7.0 removed).
 
 blockers: none (GitHub push awaits user-supplied repo + PAT — by design, no
 secrets live in the repo)

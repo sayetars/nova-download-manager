@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app.dart';
 import '../core/build_version.dart';
+import '../core/sound_player.dart';
 import '../core/strings.dart';
 import '../core/theme.dart';
 import '../providers/engine.dart' as prov;
@@ -99,6 +100,8 @@ class SettingsPage extends ConsumerWidget {
             dense: true,
             contentPadding: EdgeInsets.zero,
           ),
+          // v1.8.0 (IDM "Automatic startup" parity): run the engine at login.
+          _AutostartToggle(),
         ]),
 
         _section(context, Icons.videocam_outlined, s.videoDetection, [
@@ -1802,5 +1805,50 @@ class _ServerProfilesSection extends ConsumerWidget {
     final fail = (p['fail'] as num?)?.toDouble() ?? 0;
     if (ok + fail == 0) return '—';
     return '${(100 * ok / (ok + fail)).toStringAsFixed(0)}%';
+  }
+}
+
+/// v1.8.0 (IDM "Automatic startup" parity): registers the engine host to start
+/// with the OS (Windows: HKCU Run key; Linux: XDG autostart). The state comes
+/// from the engine's get_autostart, so it reflects the real OS registration.
+class _AutostartToggle extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_AutostartToggle> createState() => _AutostartToggleState();
+}
+
+class _AutostartToggleState extends ConsumerState<_AutostartToggle> {
+  bool? _enabled;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final engine = ref.read(prov.engineProvider);
+    try {
+      final resp = await engine?.call('get_autostart');
+      if (mounted) setState(() => _enabled = resp?['enabled'] == true);
+    } catch (_) {
+      if (mounted) setState(() => _enabled = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = S.of(context);
+    return SwitchListTile(
+      value: _enabled ?? false,
+      onChanged: (v) async {
+        final engine = ref.read(prov.engineProvider);
+        await engine?.call('set_autostart', {'enabled': v});
+        await _refresh();
+      },
+      title: Text(s.autostartEngine, style: const TextStyle(fontSize: 13.5)),
+      subtitle: Text(s.autostartEngineHint, style: const TextStyle(fontSize: 11.5)),
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+    );
   }
 }

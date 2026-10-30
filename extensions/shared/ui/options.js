@@ -6,7 +6,7 @@ const $ = (id) => document.getElementById(id);
 
 // ---- v1.7.0 version-integrity About section (EN/FA) ---------------------------
 
-const MIN_ENGINE_VERSION = '1.7.1'; // stamped from version.json by scripts/sync_versions.py
+const MIN_ENGINE_VERSION = '1.8.0'; // stamped from version.json by scripts/sync_versions.py
 
 const I18N = {
   en: {

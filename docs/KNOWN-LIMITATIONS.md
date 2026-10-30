@@ -8,8 +8,8 @@ This repository was **built and tested on Linux** (.NET 8.0.426 + Flutter 3.47.7
 
 | Area | Status |
 |---|---|
-| Engine, scheduler, media, persistence, IPC | **Built + 43/43 automated tests passing on this machine** (real HTTP, real files, real processes) |
-| Flutter app | `flutter analyze` clean + 13 tests passing; **Windows UI binary NOT compiled here** (Flutter cannot cross-compile Windows from Linux) — v1.6.0 ships the cross-compiled ENGINE side for Windows (`nova-engine-1.6.0-win-x64.zip`) and `.github/workflows/windows-build.yml` builds the full installer on a hosted Windows runner |
+| Engine, scheduler, media, persistence, IPC | **Built + 320/320 automated tests passing** (real HTTP, real files, real processes; v1.8.0) |
+| Flutter app | `flutter analyze` clean + 13 tests passing; **Windows UI binary NOT compiled here** (Flutter cannot cross-compile Windows from Linux) — v1.6.0+ ships the cross-compiled ENGINE side for Windows (`nova-engine-*-win-x64.zip`) and `.github/workflows/windows-build.yml` builds the full installer on a hosted Windows runner |
 | C++ pipe bridge (`nova/pipe`) | Compiles only with the Windows runner — **not compiled here** (no MSVC on Linux); the v1.6.0 GH Actions workflow compiles it on every run |
 | Windows installer (Inno Setup) | Script complete; **not compiled here** (iscc is Windows-only); the GH Actions workflow runs iscc on windows-latest |
 | Extension load in Chrome/Brave/Firefox | Built and packaged; **not manually tested in real browsers on this machine** (no GUI/browsers in the sandbox) |
@@ -21,11 +21,11 @@ This repository was **built and tested on Linux** (.NET 8.0.426 + Flutter 3.47.7
 3. **DRM content is refused, always** — including AES-128 HLS, DASH with ContentProtection, and EME-flagged players.
 4. **Quality/size values are only shown when provable** — DASH sizes are labeled "estimated"; direct-file sizes are exact. Nothing is invented.
 5. **`blob:`/MSE-only players** depend on network observation of the underlying segments; sites with fully encrypted pipelines may yield no candidates (the panel says so honestly).
-6. **HTTP Basic/Digest auth** is not stored by the engine; 401/403 surfaces as an auth error for the user to resolve (no credential prompt yet).
+6. **HTTP Basic/Digest auth** — CLOSED in v1.8.0: the engine retries 401/407 with login-vault credentials at BOTH probe and slice stage, and a task that still lacks credentials fails with `auth_required`, which pops the UI login dialog (`provide_auth` IPC, optional save-to-vault, re-prompt on rejection — IDM behaviour). Digest/NTLM negotiation beyond Basic remains vault-scheme metadata only.
 7. **BitTorrent (v1.4.0) — honest scope**: implemented and loopback-verified (bencode, HTTP/UDP trackers, DHT query path, peer wire, ut_metadata, rarest-first/sequential pickers, resume bitfield, seeding, multi-file split). Not yet implemented: PEX (BEP-11), LPD, DHT peer-store serving (our DHT node answers get_peers with tokens but does not host peer lists), super-seeding, per-file selection inside multi-file torrents, and UDP tracker scrape. Public-swarm behavior depends on real-world tracker/DHT reachability from the user's network and is not verifiable from this sandbox.
-8. **Flutter tray/minimize-to-tray** was not shipped with a package dependency (the chosen tray packages required GTK dev headers at test time on the sandbox's Linux); the Windows runner integration is the planned home for tray support — currently closing the window exits the UI while the engine keeps downloading.
+8. **Tray**: Windows ships the tray (v1.8.0, `Shell_NotifyIconW` in the runner + close-to-tray + menu). Linux tray remains unshipped (the chosen tray packages required GTK dev headers at test time); closing the window still exits the UI while the engine keeps downloading. Same for **drag-out of downloaded files**: the OLE `DoDragDrop` implementation is in the Windows runner (v1.8.0); the Linux GTK drag-out needs runner work not shipped yet.
 9. **Windows mini-window runner code (v1.2.0)** — `windows/runner/main.cpp` detects `--mini` and applies `HWND_TOPMOST` + `WS_EX_TOOLWINDOW`; as with the v1.1.0 DnD bridge, this is structurally complete but **not compiled here** (no MSVC). The Linux equivalent is compiled, smoke-tested and VLM-verified.
-10. **Extension special keys are modifier-only** (alt/ctrl/shift) — modifiers are directly observable on click events; a configurable non-modifier key (e.g. Insert, IDM's default) would require stricter page key-capture permissions and was not taken.
+10. **Extension special keys** cover alt/ctrl/shift + Insert (IDM's own default, tracked via keydown/keyup state since v1.8.0). Arbitrary non-modifier keys (e.g. F9) are not yet selectable.
 9. **Single-user machine trust model**: any process of the *same* OS account can connect to the engine (same-account compromise is out of scope; different accounts are blocked by ACL + token).
 10. **Video-detection coverage** is verified for MP4/HLS/DASH test fixtures; the general claim is limited to "sites whose players expose standard media elements or network-visible segments" — no 100% detection promise.
 11. **Extension store publishing** is not done (requires developer accounts + signed packages). Dev-mode loading is fully supported and documented.
@@ -35,7 +35,7 @@ This repository was **built and tested on Linux** (.NET 8.0.426 + Flutter 3.47.7
 15. **MP4 files with the `moov` atom at the END cannot be previewed meaningfully** — that is inherent to the container (the player needs the index before the media data; "faststart" files and TS/MKV stream fine). The preview still serves the bytes; the player simply may refuse or stall.
 16. **Metalink PGP "require" policy fails the task but keeps the temp file** — resume/retry with a corrected keyring works without redownloading completed pieces.
 17. **Server performance profiles are advisory** — they reorder equal-priority metalink mirrors and inform the Settings table; they never override an explicit higher-priority mirror (RFC 5854 priority is authoritative).
-18. **PAC (proxy auto-config) script evaluation is not implemented** — static proxy configuration only (HTTP/SOCKS4/4a/5 + auth + bypass lists). A PAC engine would add a JS interpreter dependency (Jint, MIT — free- and license-compliant); recorded as a future item after the 2026-10-30 parallel-tree audit (DECISIONS D-014 — it was the tree's one genuine delta). WPAD/DHCP auto-discovery stays out of scope.
+18. **PAC (proxy auto-config)** — CLOSED in v1.8.0: `PacResolver` (Jint, MIT) evaluates real-world scripts with the full standard helper environment; `proxy.mode=pac` + `proxy.pac_url` wire it into every engine-side HttpClient; Settings has a live test button and a `Get System` detector. WPAD/DHCP auto-discovery stays out of scope (explicit URL only, by choice).
 
 ## Environment-sensitive tests (this Linux sandbox)
 
@@ -74,3 +74,18 @@ Each encrypted HLS segment is held in memory before decryption, capped at 512 Mi
 segment (`HlsCrypt.MaxInMemorySegmentBytes`); typical TS segments are 1–10 MiB, so this
 is not a practical constraint, but a malicious playlist declaring giant segments will be
 rejected with `segment_too_large` rather than exhausting RAM.
+
+## 39. IDM-parity completion notes (v1.8.0)
+- **Lone-task infinite retry is ON by default** (IDM behaviour: a retryable failure of
+  the only remaining task in a queue retries every 30 s forever). Set
+  `engine.lone_infinite_retry=false` for a hard stop. Non-retryable errors (404 etc.)
+  still fail immediately — deliberately smarter than IDM, which retries those too.
+- **Per-queue post actions** (`queue.post_action.<name>`) fire on the queue's
+  active→idle transition with up to one 20 s evaluation delay (the housekeeping timer).
+- **`open:<path>` post actions** run via the shell: file associations apply; a .bat is
+  IDM's documented way to run several programs.
+- **Autostart** registers the ENGINE host (HKCU Run / XDG autostart), not the UI — the
+  UI attaches to the already-running engine, matching the background-download model.
+- **Registrable-domain heuristic** for "explore all sites within the main domain" is
+  label-based (www.x.com → x.com) without a Public Suffix List; "co.uk"-style TLDs keep
+  their second label.

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show AppExitRequest, AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -105,6 +106,8 @@ class _ShellPageState extends ConsumerState<ShellPage> with WidgetsBindingObserv
           }
           if (t.state == 'failed' && !oldFailed.contains(t.taskKey)) {
             _playEventSound('error');
+            // v1.8.0 (IDM login-dialog parity): 401/407 → credential prompt.
+            if (t.errorCode == 'auth_required') _onAuthRequired(t);
           }
           if (t.state == 'downloading' && !oldDownloading.contains(t.taskKey)) {
             _onTaskStarted(t); // IDM "Downloads" tab: progress view on start
@@ -157,7 +160,7 @@ class _ShellPageState extends ConsumerState<ShellPage> with WidgetsBindingObserv
 
   // v1.8.0 (IDM tray parity): intercept the window close button.
   @override
-  Future<AppExitRequest> didRequestAppExit() async {
+  Future<AppExitResponse> didRequestAppExit() async {
     final minimize = ref.read(prov.settingsProvider)['ui.minimize_to_tray'] == 'true';
     if (minimize) {
       final hidden = await NovaTray.hide();
@@ -241,6 +244,64 @@ class _ShellPageState extends ConsumerState<ShellPage> with WidgetsBindingObserv
         .toSet();
     if (!enabled.contains(event)) return;
     SoundPlayer.play(settings['sounds.file.$event']);
+  }
+
+  /// v1.8.0 (IDM login-dialog parity): a task failed with auth_required —
+  /// ask for credentials, hand them to the engine (provide_auth) and optionally
+  /// store them in the login vault for the whole site.
+  void _onAuthRequired(TaskUi t) {
+    if (!mounted) return;
+    final s = S.of(context);
+    final user = TextEditingController();
+    final pass = TextEditingController();
+    var save = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: Text(s.loginRequired),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('${s.loginRequiredFor}:\n${t.fileName}'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: user,
+              autofocus: true,
+              decoration: InputDecoration(labelText: s.userName, border: const OutlineInputBorder()),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: pass,
+              obscureText: true,
+              onSubmitted: (_) => Navigator.pop(ctx, true),
+              decoration: InputDecoration(labelText: s.password, border: const OutlineInputBorder()),
+            ),
+            CheckboxListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              value: save,
+              onChanged: (v) => setState(() => v ?? save),
+              title: Text(s.rememberLogin, style: const TextStyle(fontSize: 13)),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s.cancel)),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(s.ok)),
+          ],
+        ),
+      ),
+    ).then((ok) {
+      user.dispose();
+      pass.dispose();
+      if (ok != true) return;
+      final engine = ref.read(prov.engineProvider);
+      engine?.call('provide_auth', {
+        'task_key': t.taskKey,
+        'user': user.text,
+        'pass': pass.text,
+        'save_to_vault': save,
+      });
+    });
   }
 
   @override

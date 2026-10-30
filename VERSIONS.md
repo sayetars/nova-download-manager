@@ -2,6 +2,7 @@
 
 | Version | Date | Status | Notes |
 |---------|------|--------|-------|
+| v1.8.0 | 2026-10-30 | RELEASED (Linux x64 + Windows engine x64) | **IDM full-parity completion round** (user directive: research IDM deeply, implement everything). Fresh official-source research → refreshed `docs/IDM-PARITY.md` (63 rows); closed: PAC proxy auto-config (Jint + test button + Get System detector), interactive 401/407 login dialog + vault URL-prefix entries, per-queue retry defaults + lone-task infinite 30 s retry, per-queue "open file when done" post actions, Grabber step-3/4 options (parent dirs / subdomains / external levels / size filters), HTTP/2 offer, Windows tray, drag-out of downloaded files (OLE), Insert special key, per-event sounds, progress-view modes, shown-fields chooser, autostart at login, weekly auto-update, Save As + change-folder-on-last-selected, ignore-mtime-on-resume. Fixed 4 latent bugs incl. multi-segment resume restarting from zero since v1.1.0 and the uncompiled fdba99f v1.8.0-start code. C# **320/320**; Flutter 13 + **0 analyze**; sync --check + free audit PASS; tarball clean-env PASS. |
 | v1.7.1 | 2026-10-29 | RELEASED (Linux x64 + Windows engine x64) | **Free-forever policy round.** docs/FREE-FOREVER.md (hard invariant, EN+FA); THIRD-PARTY-NOTICES.md audit (13 deps, all $0); scripts/free_audit.py CI gate (dependency allowlist + banned paid terms, in version-audit.yml); Trusted Signing REJECTED (D-013) → VERSIONING §8 free path (SHA-256 + self-signed); root LICENSE; free-forever line in Settings→Versions + extension About (EN/FA); LICENSE+NOTICES+FREE-FOREVER ship in both packages. 242/242 C#; Flutter 13 + 0 analyze; sync --check + free audit PASS; smoke + clean-env PASS. |
 | v1.0.0 | 2026-10-23 | RELEASED (Windows path) | Engine + Flutter UI + extensions + installer + docs. 43/43 C# tests ×2, 8/8 Flutter tests, 0 analyze errors. Commits up to b06e865 + checkpoint c0dfa89. |
 | v1.7.0 | 2026-10-29 | RELEASED (Linux x64 + Windows engine x64) | **Version-integrity round + AES-128 HLS.** `version.json` SSOT + `sync_versions.py` (10 stamped surfaces, 3 cross-checks) + CI audit gate (a drifted tree cannot build); runtime gates (boot schema fail-fast, truthful `engine_status`, extension EN/FA compatibility banner, Settings→Versions); `check_update` JSON manifest + `SemVersion`; legacy `nova/` tree (73 MB) purged (D-012); git tags v1.5.0/v1.6.0 recreated. AES-128 HLS downloaded + decrypted per RFC 8216 (explicit IV, sequence-IV fallback, mixed playlists; DRM still refused). C# 208→**242** tests; Flutter 13 + 0 analyze; linux tarball + win zip + ext zips rebuilt; smoke + clean-env PASS. |
@@ -24,17 +25,13 @@
 ## Builds published to Dropbox (/Nova-Download-Manager/builds/)
 Cloud pruned 2026-10-28 per the user's space directive (CLOUD-POLICY.md): keep only current + previous release assets. Rows below record publication history; entries no longer in the cloud are marked [removed].
 
-| Artifact | Version | Cloud status (2026-10-29) |
+| Artifact | Version | Cloud status (2026-10-30) |
 |----------|---------|---------------------------|
-| **nova-dm-1.7.1-linux-x64.tar.gz (47 MB, sha256 727f7b78…90aaa)** | v1.7.1 | PUBLISHED 2026-10-29 (clean-env PASS) |
-| **nova-engine-1.7.1-win-x64.zip (101 MB, sha256 45562fcb…a40c…)** | v1.7.1 | PUBLISHED 2026-10-29 |
-| nova-chromium-1.7.1.zip / nova-firefox-1.7.1.zip (+ .sha256) | v1.7.1 | PUBLISHED 2026-10-29 |
-| **nova-dm-1.7.0-linux-x64.tar.gz (48,446,039 B, sha256 f6a5a596…13e9a690)** | v1.7.0 | PUBLISHED 2026-10-29 (clean-env PASS) |
-| **nova-engine-1.7.0-win-x64.zip (105,026,000 B, sha256 199be705…9fcd485)** | v1.7.0 | PUBLISHED 2026-10-29 |
-| nova-chromium-1.7.0.zip / nova-firefox-1.7.0.zip (+ .sha256) | v1.7.0 | PUBLISHED 2026-10-29 |
-| nova-engine-1.6.0-win-x64.zip (101 MiB, sha256 96be7baf…60970e) | v1.6.0 | PRESENT (previous release — keep per policy) |
-| nova-dm-1.6.0-linux-x64.tar.gz (47 MiB, sha256 1b730550…d0ca21) | v1.6.0 | [removed 2026-10-29] superseded per keep-2 |
-| nova-chromium-1.6.0.zip / nova-firefox-1.6.0.zip (+ .sha256) | v1.6.0 | [removed 2026-10-29] superseded per keep-2 |
+| **nova-dm-1.8.0-linux-x64.tar.gz (50,760,022 B, sha256 2e6ccda1…4b89e5)** | v1.8.0 | PUBLISHED 2026-10-30 (clean-env PASS) |
+| **nova-engine-1.8.0-win-x64.zip (106,168,361 B, sha256 a318af06…6d759)** | v1.8.0 | PUBLISHED 2026-10-30 |
+| nova-chromium-1.8.0.zip / nova-firefox-1.8.0.zip (+ .sha256) | v1.8.0 | PUBLISHED 2026-10-30 |
+| nova-dm-1.7.1-linux-x64.tar.gz + sidecars (all four artifacts) | v1.7.1 | PRESENT (previous release — keep per policy) |
+| nova-dm-1.7.0-linux-x64.tar.gz / engine zip / ext zips (+ .sha256) | v1.7.0 | [removed 2026-10-30] superseded per keep-2 |
 | nova-chromium-1.5.0.zip / nova-firefox-1.5.0.zip (+ .sha256) | v1.5.0 | [removed 2026-10-29] superseded by v1.7.0 (current) + v1.6.0 (previous) per keep-2 |
 | nova-dm-1.4.1-linux-x64.tar.gz (48,266,349 B, sha256 fe34c36a7527493b37105583254cdbb2149fe8c97e5bbd79b93608ebb1c1c384) | v1.4.1 | [removed 2026-10-29] was previous-release; superseded by v1.6.0 (current) + v1.5.0 zips (previous) per CLOUD-POLICY keep-2 |
 | nova-chromium-1.4.1.zip / nova-firefox-1.4.1.zip | v1.4.1 | [removed 2026-10-29] same policy |

@@ -124,6 +124,33 @@ public sealed class GrabberStartRequest
     public bool Scripts { get; set; }
     public bool Video { get; set; }
     public bool RewriteForOffline { get; set; } = true;
+    /// <summary>v1.8.0 (IDM Grabber wizard step 3): explore pages above the start
+    /// page's directory ("Don't explore parent directories" off).</summary>
+    public bool ExploreParentDirectories { get; set; }
+    /// <summary>v1.8.0 (IDM Grabber wizard step 3): "Explore all sites within the main domain".</summary>
+    public bool ExploreSubdomains { get; set; }
+    /// <summary>v1.8.0 (IDM Grabber wizard step 3): levels to process on other sites.</summary>
+    public int ExternalDepth { get; set; }
+    /// <summary>v1.8.0 (IDM Grabber wizard step 4): minimum file size in bytes (0 = off).</summary>
+    public long MinBytes { get; set; }
+    /// <summary>v1.8.0 (IDM Grabber wizard step 4): maximum file size in bytes (0 = off).</summary>
+    public long MaxBytes { get; set; }
+}
+
+/// <summary>v1.8.0 (IDM login-dialog parity): credentials answered in the UI auth dialog.</summary>
+public sealed class ProvideAuthRequest
+{
+    public string TaskKey { get; set; } = string.Empty;
+    public string UserName { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    /// <summary>Also store the credentials in the login vault for the site.</summary>
+    public bool SaveToVault { get; set; }
+}
+
+/// <summary>v1.8.0 (IDM "run at Windows startup" parity): toggle engine autostart.</summary>
+public sealed class SetAutostartRequest
+{
+    public bool Enabled { get; set; }
 }
 
 /// <summary>Login vault (IDM parity: site logins).</summary>

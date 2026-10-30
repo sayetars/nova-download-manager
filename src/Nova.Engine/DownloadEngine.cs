@@ -35,6 +35,9 @@ public sealed class DownloadEngine : IAsyncDisposable
     private readonly System.Timers.Timer _retryTimer;
     private readonly List<string> _quotaPausedKeys = new();
     private readonly ConcurrentDictionary<string, SegmentView[]> _livePlans = new();
+    /// <summary>v1.8.0 (IDM login-dialog parity): per-task credentials supplied via
+    /// the auth prompt (provide_auth IPC), consumed by TaskRunner before the vault.</summary>
+    private readonly ConcurrentDictionary<string, TaskCredentials> _providedAuth = new();
     private RateLimiter? _globalLimiter;
 
     public EngineEventBus Events => _events;
@@ -184,6 +187,9 @@ public sealed class DownloadEngine : IAsyncDisposable
             Referer = spec.Referer,
             ExpectedSha256 = spec.ExpectedSha256,
             MaxConnections = Math.Clamp(spec.MaxConnections ?? _defaultConnections, 1, 32),
+            // v1.8.0 (IDM Scheduler parity): per-queue "number of retries for each
+            // file" default — an explicit per-task value still wins.
+            MaxRetries = spec.MaxRetries ?? QueueRetryDefault(spec.QueueName ?? "main"),
             SpeedCapBytes = spec.SpeedCapBytes,
             Priority = spec.Priority,
             MediaSelection = spec.MediaSelection,
@@ -220,6 +226,17 @@ public sealed class DownloadEngine : IAsyncDisposable
 
     public IReadOnlyList<AddDownloadOutcome> AddBatch(IEnumerable<NewDownload> specs)
         => specs.Select(s => Add(s)).Select(r => r.Ok ? r.Value! : new AddDownloadOutcome("error:" + r.Error!.Code, -1, false)).ToList();
+
+    /// <summary>
+    /// v1.8.0 (IDM Scheduler "Number of retries for each file" parity): the queue-wide
+    /// retry default from settings key <c>queue.max_retries.&lt;name&gt;</c> (clamped 1–99;
+    /// unset → engine default).
+    /// </summary>
+    private int QueueRetryDefault(string queueName)
+    {
+        var raw = _settings.Get($"queue.max_retries.{queueName}");
+        return int.TryParse(raw, out var n) ? Math.Clamp(n, 1, 99) : 5; // engine default = entity default
+    }
 
     public static DownloadKind DetectKind(string url)
     {
@@ -429,7 +446,8 @@ public sealed class DownloadEngine : IAsyncDisposable
             (t, plan) => _livePlans[t.TaskKey] = plan.Select(s => new SegmentView(s.Index, s.Start, s.End, s.Received)).ToArray(),
             k => _settings.Get(k),
             _profiles, _pgpKeys, _ytdlp,
-            _rememberCategoryDir);
+            _rememberCategoryDir,
+            taskKey => _providedAuth.TryGetValue(taskKey, out var c) ? c : null);
 
         e.Runner = runner;
         _livePlans.TryRemove(e.Task.TaskKey, out _);
@@ -448,6 +466,37 @@ public sealed class DownloadEngine : IAsyncDisposable
         });
     }
 
+    /// <summary>
+    /// v1.8.0 (IDM login-dialog parity): stores credentials answered in the UI auth
+    /// dialog for a task that failed with <c>auth_required</c>, clears the error and
+    /// re-queues it. Returns false when the task does not exist.
+    /// </summary>
+    public bool ProvideAuth(string taskKey, string userName, string password)
+    {
+        if (string.IsNullOrWhiteSpace(userName)) return false;
+        if (!_tasks.TryGetValue(taskKey, out var e)) return false;
+        _providedAuth[taskKey] = new TaskCredentials(userName, password);
+        e.Task.ErrorCode = null;
+        e.Task.ErrorMessage = null;
+        e.Task.ErrorCategory = null;
+        e.Task.RetryCount = 0;
+        e.BackoffAttempt = 0;
+        if (e.Task.State is DownloadState.Failed or DownloadState.Interrupted or DownloadState.Created)
+            e.Task.State = DownloadState.Queued;
+        _repo.Update(e.Task);
+        _events.TaskUpdated(e.Task);
+        return true;
+    }
+
+    /// <summary>v1.8.0: true when this is the only non-finished task in its queue
+    /// (IDM's "left alone in the queue" infinite-retry rule).</summary>
+    private bool IsLoneTaskInQueue(Entry e)
+        => e.Task.State is not (DownloadState.Completed or DownloadState.Failed or DownloadState.Cancelled)
+           && !_tasks.Values.Any(x => !ReferenceEquals(x, e)
+               && x.Task.QueueName == e.Task.QueueName
+               && x.Task.State is not (DownloadState.Completed or DownloadState.Failed
+                   or DownloadState.Cancelled));
+
     private void HandleFailure(Entry e, NovaError error, bool retryable)
     {
         e.Task.ErrorCode = error.Code;
@@ -461,6 +510,23 @@ public sealed class DownloadEngine : IAsyncDisposable
             e.NextRetryAtMs = Environment.TickCount64 + (long)Backoff.Compute(e.BackoffAttempt, e.RetryAfterHeader).TotalMilliseconds;
             _repo.Update(e.Task);
             _events.TaskUpdated(e.Task);
+            return;
+        }
+
+        // v1.8.0 (IDM Scheduler parity): "If the file that IDM cannot download is
+        // left alone in the queue, IDM will retry to download the file infinitely
+        // with 30 seconds interval between retries" — a retryable failure of the
+        // ONLY remaining task in its queue keeps retrying at a fixed 30 s cadence
+        // (setting engine.lone_infinite_retry=false restores the hard stop).
+        if (retryable && e.Task.RetryCount >= e.Task.MaxRetries
+            && IsLoneTaskInQueue(e) && _settings.Get("engine.lone_infinite_retry") != "false")
+        {
+            e.Task.RetryCount++;
+            e.Task.State = DownloadState.Retrying;
+            e.NextRetryAtMs = Environment.TickCount64 + 30_000;
+            _repo.Update(e.Task);
+            _events.TaskUpdated(e.Task);
+            EngineLog.Info($"task {e.Task.TaskKey} is alone in queue '{e.Task.QueueName}' — infinite 30 s retry (IDM parity)");
             return;
         }
 
@@ -589,6 +655,8 @@ public sealed record NewDownload
     public string? Referer { get; init; }
     public string? ExpectedSha256 { get; init; }
     public int? MaxConnections { get; init; }
+    /// <summary>v1.8.0 (IDM Scheduler parity): per-task retry budget; null → queue default (queue.max_retries.&lt;name&gt;).</summary>
+    public int? MaxRetries { get; init; }
     public long SpeedCapBytes { get; init; }
     public TaskPriority Priority { get; init; } = TaskPriority.Normal;
     public DownloadKind? Kind { get; init; }

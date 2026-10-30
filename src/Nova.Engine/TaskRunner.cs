@@ -37,6 +37,9 @@ public sealed class TaskRunner
     private readonly Security.PgpKeyringService? _pgpKeys;
     private readonly YtDlp.YtDlpBridge? _ytdlp;
     private readonly Action<string, string>? _rememberCategoryDir;
+    /// <summary>v1.8.0 (IDM login-dialog parity): per-task credentials supplied by the
+    /// user through the auth prompt (taskKey → credentials). Checked BEFORE the vault.</summary>
+    private readonly Func<string, TaskCredentials?>? _taskAuth;
     private long _lastLivePublishMs;
 
     public TaskRunner(HttpClient http, HttpProber prober, IDownloadTaskRepository tasks,
@@ -51,7 +54,8 @@ public sealed class TaskRunner
         ServerProfileService? profiles = null,
         Security.PgpKeyringService? pgpKeys = null,
         YtDlp.YtDlpBridge? ytdlp = null,
-        Action<string, string>? rememberCategoryDir = null)
+        Action<string, string>? rememberCategoryDir = null,
+        Func<string, TaskCredentials?>? taskAuth = null)
     {
         _http = http;
         _prober = prober;
@@ -74,11 +78,53 @@ public sealed class TaskRunner
         _pgpKeys = pgpKeys;
         _ytdlp = ytdlp;
         _rememberCategoryDir = rememberCategoryDir;
+        _taskAuth = taskAuth;
     }
 
     public SpeedMeter Speed { get; } = new();
 
+    /// <summary>v1.8.0: best available credentials for a task — the auth-prompt
+    /// answer (per-task) wins over the login vault. Null when neither has one.</summary>
+    private TaskCredentials? CredentialsFor(DownloadTask task)
+        => _taskAuth?.Invoke(task.TaskKey)
+           ?? (_vault?.Find(task.Url) is { } v ? new TaskCredentials(v.UserName, v.Password) : null);
+
     private string? Setting(string key) => _settings?.Invoke(key);
+
+    /// <summary>
+    /// v1.8.0 (IDM login-dialog parity): probe with one auth retry. When the server
+    /// answers 401/407 and we hold credentials (auth-prompt answer or vault), the
+    /// probe is retried once with a Basic Authorization header. Without credentials
+    /// (or after a rejection) the failure is re-coded as <c>auth_required</c> so the
+    /// UI can open the login dialog and call <c>provide_auth</c>.
+    /// </summary>
+    private async Task<HttpProbeResult> ProbeWithAuthAsync(DownloadTask task, CancellationToken ct)
+    {
+        var url = task.EffectiveUrl ?? task.Url;
+        try
+        {
+            return await _prober.ProbeAsync(url, task.Referer, ct, task);
+        }
+        catch (NovaHttpException hex) when (hex.Code is "http_401" or "http_407")
+        {
+            var creds = CredentialsFor(task);
+            if (creds is null)
+                throw new NovaHttpException("auth_required", ErrorCategory.Auth,
+                    "The server requires a login. Enter your credentials to continue.",
+                    url, details: "credentials_missing", retryable: false);
+            try
+            {
+                return await _prober.ProbeAsync(url, task.Referer, ct, task, creds.BasicHeader());
+            }
+            catch (NovaHttpException retryHex) when (retryHex.Code is "http_401" or "http_407")
+            {
+                // credentials were attached but rejected — prompt again (IDM behaviour)
+                throw new NovaHttpException("auth_required", ErrorCategory.Auth,
+                    "The server rejected the stored login. Enter different credentials.",
+                    url, details: "credentials_rejected", retryable: false);
+            }
+        }
+    }
 
     /// <summary>
     /// v1.3.0 multi-source pool (aria2/FDM parity): the file is fetched from the primary
@@ -158,7 +204,7 @@ public sealed class TaskRunner
 
             // ---- analyze / revalidate -------------------------------------
             var probeSw = System.Diagnostics.Stopwatch.StartNew();
-            var probe = await _prober.ProbeAsync(task.EffectiveUrl ?? task.Url, task.Referer, ct, task);
+            var probe = await ProbeWithAuthAsync(task, ct);
             _profiles?.RecordTtfb(task.EffectiveUrl ?? task.Url, probeSw.ElapsedMilliseconds);
             _profiles?.RecordResult(task.EffectiveUrl ?? task.Url, true);
 
@@ -205,7 +251,7 @@ public sealed class TaskRunner
                 if (metalinkApplied)
                 {
                     // re-probe the real file behind the metalink
-                    probe = await _prober.ProbeAsync(task.EffectiveUrl ?? task.Url, task.Referer, ct, probeWithTask);
+                    probe = await ProbeWithAuthAsync(task, ct);
                     task.EffectiveUrl = probe.FinalUrl;
                     task.Etag = probe.Etag;
                     task.LastModified = probe.LastModified;
@@ -518,6 +564,20 @@ public sealed class TaskRunner
         }
         catch (NovaHttpException hex)
         {
+            // v1.8.0 (IDM login-dialog parity): surface 401/407 as auth_required so the
+            // UI opens the login dialog instead of a dead-end error (covers the slice
+            // stage and any path that bypassed ProbeWithAuthAsync).
+            if (hex.Code is "http_401" or "http_407")
+            {
+                var rejected = CredentialsFor(task) is not null;
+                Fail(task, new NovaError("auth_required", ErrorCategory.Auth,
+                    rejected
+                        ? "The server rejected the stored login. Enter different credentials."
+                        : "The server requires a login. Enter your credentials to continue.",
+                    new Dictionary<string, string> { ["detail"] = rejected ? "credentials_rejected" : "credentials_missing" }),
+                    retryable: false);
+                return;
+            }
             Fail(task, new NovaError(hex.Code, hex.Category, hex.Message, hex.Details), retryable: hex.Retryable);
         }
         catch (IOException io) when (IsDiskFull(io))
@@ -791,13 +851,15 @@ public sealed class TaskRunner
 
             using (resp)
             {
-                if (resp.StatusCode == HttpStatusCode.Unauthorized && !vaultTried && _vault is not null)
+                if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.ProxyAuthenticationRequired
+                    && !vaultTried)
                 {
                     vaultTried = true;
-                    var cred = _vault.Find(task.Url);
+                    // v1.8.0: auth-prompt credentials first, then the login vault
+                    var cred = CredentialsFor(task);
                     if (cred is not null)
                     {
-                        // retry once with vault credentials attached (Basic scheme)
+                        // retry once with credentials attached (Basic scheme)
                         using var retryReq = new HttpRequestMessage(HttpMethod.Get, source);
                         if (knownLength)
                             retryReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, sliceStart + want - 1);
@@ -805,7 +867,7 @@ public sealed class TaskRunner
                             retryReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(sliceStart, null);
                         HttpProber.AddDefaultHeaders(retryReq, task.Referer);
                         ApplyTaskHeaders(retryReq, task);
-                        retryReq.Headers.TryAddWithoutValidation("Authorization", new TaskCredentials(cred.UserName, cred.Password).BasicHeader());
+                        retryReq.Headers.TryAddWithoutValidation("Authorization", cred.BasicHeader());
                         using var retryResp = await _prober.SendGuardedAsync(retryReq, ct);
                         await DrainSliceAsync(task, pool, seg, retryResp, file, knownLength, want, limiters, ct);
                         if (knownLength && seg.IsComplete) break;

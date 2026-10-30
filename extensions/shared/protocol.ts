@@ -10,7 +10,7 @@ export const NATIVE_HOST = 'com.nova.downloadmanager';
  * the minimum engine the extension needs. The options page compares it against
  * engine_status.engine_version and shows a red banner when the engine is older.
  */
-export const MIN_ENGINE_VERSION = '1.7.1';
+export const MIN_ENGINE_VERSION = '1.8.0';
 
 /** SemVer compare (major.minor.patch only); returns -1 | 0 | 1; 0 when unparseable. */
 export function cmpVersions(a: string, b: string): number {
@@ -47,10 +47,12 @@ export interface ExtSettings {
   preferredQuality: string; // 'ask' | 'best' | height like '720'
   allowlist: string[]; // hosts; empty = all (except blocklist)
   blocklist: string[];
-  /** IDM parity v1.2.0 — special keys: hold this modifier while clicking a link to force download with Nova. */
-  interceptKey: 'alt' | 'ctrl' | 'shift' | 'none';
+  /** IDM parity v1.2.0 — special keys: hold this key while clicking a link to force download with Nova.
+   * v1.8.0: 'insert' added — IDM's own default — tracked via keydown/keyup state
+   * (non-modifier keys have no flag on click events). */
+  interceptKey: 'alt' | 'ctrl' | 'shift' | 'insert' | 'none';
   /** IDM parity v1.2.0 — while this key is held, Nova overlay + interception are suppressed. */
-  preventKey: 'none' | 'alt' | 'ctrl' | 'shift';
+  preventKey: 'none' | 'alt' | 'ctrl' | 'shift' | 'insert';
   /** v1.3.0 — opt-in: send the site's cookies with the download so login-gated files work. Privacy-first: OFF by default. */
   passCookies: boolean;
 }
@@ -100,8 +102,9 @@ export function siteAllowed(url: string, s: ExtSettings): boolean {
   }
 }
 
-/** IDM parity v1.2.0 — does this keyboard event hold the configured special key? */
-export function keyMatches(e: KeyboardEvent, key: 'alt' | 'ctrl' | 'shift' | 'none'): boolean {
+/** IDM parity v1.2.0 — does this keyboard event hold the configured special key?
+ * v1.8.0: 'insert' compares against e.key (works on keydown/keyup state events). */
+export function keyMatches(e: KeyboardEvent, key: 'alt' | 'ctrl' | 'shift' | 'insert' | 'none'): boolean {
   switch (key) {
     case 'alt':
       return e.altKey || e.key === 'Alt';
@@ -109,9 +112,23 @@ export function keyMatches(e: KeyboardEvent, key: 'alt' | 'ctrl' | 'shift' | 'no
       return e.ctrlKey || e.key === 'Control';
     case 'shift':
       return e.shiftKey || e.key === 'Shift';
+    case 'insert':
+      return e.key === 'Insert' || e.code === 'Insert';
     default:
       return false;
   }
+}
+
+/** v1.8.0 — is the configured special key held at CLICK time? Modifiers read their
+ * event flags; non-modifier keys (insert) come from the tracked keydown/keyup state
+ * that the content script maintains. */
+export function keyHeldForClick(
+  click: MouseEvent,
+  key: 'alt' | 'ctrl' | 'shift' | 'insert' | 'none',
+  insertHeld: boolean,
+): boolean {
+  if (key === 'insert') return insertHeld;
+  return keyMatches(click as unknown as KeyboardEvent, key);
 }
 
 // ---- background ⇄ content message contracts ---------------------------------

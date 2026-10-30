@@ -28,6 +28,10 @@ public sealed class TestHttpServer : IDisposable
     public List<string> RequestsSeen { get; } = new();
     /// <summary>v1.3.0 test hook: observed (path, Cookie, X-Nova-Test) request headers.</summary>
     public List<(string Path, string? Cookie, string? Custom)> HeaderObservations { get; } = new();
+    /// <summary>v1.8.0 test hook: when set, requests without this Basic auth pair get 401.</summary>
+    public (string user, string pass)? RequireBasicAuth { get; set; }
+    /// <summary>v1.8.0 test hook: Authorization headers observed (for auth-retry assertions).</summary>
+    public List<string?> AuthorizationSeen { get; } = new();
 
     public TestHttpServer()
     {
@@ -71,6 +75,20 @@ public sealed class TestHttpServer : IDisposable
                 res.RedirectLocation = target;
                 res.OutputStream.Close();
                 return;
+            }
+
+            // v1.8.0 auth hook: 401 until a correct Basic Authorization arrives
+            AuthorizationSeen.Add(req.Headers["Authorization"]);
+            if (RequireBasicAuth is { } auth)
+            {
+                var expect = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(auth.user + ":" + auth.pass));
+                if (!string.Equals(req.Headers["Authorization"], expect, StringComparison.Ordinal))
+                {
+                    res.StatusCode = 401;
+                    res.Headers["WWW-Authenticate"] = "Basic realm=\"nova-test\"";
+                    res.Close();
+                    return;
+                }
             }
 
             if (FailNextWith > 0)

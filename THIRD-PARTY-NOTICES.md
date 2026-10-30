@@ -15,6 +15,7 @@ parses this file as the allowlist — an unlisted dependency fails CI.
 | AngleSharp | C# engine (HTML parsing, Site Grabber) | MIT | $0 |
 | BouncyCastle.Cryptography | C# engine (Metalink PGP verification) | MIT | $0 |
 | FluentFTP | C# engine (FTP/FTPS) | MIT | $0 |
+| Jint | C# engine (PAC proxy auto-config script evaluation, v1.8.0) | MIT | $0 |
 | SSH.NET | C# engine (SFTP) | MIT | $0 |
 | Microsoft.Data.Sqlite | C# engine (SQLite storage; bundles SQLite) | MIT (SQLite: public domain) | $0 |
 | Microsoft.NET.Test.Sdk | tests only | MIT | $0 |
