@@ -82,7 +82,16 @@ public class IpcTests : IAsyncLifetime
                 // T-026: 15s budget — under full-suite parallel load on 2-4 vCPU CI
                 // runners the client-side connect retry loop can miss the default 4s
                 // window (Windows named pipes have no kernel backlog to queue into).
-                await c.ConnectAsync(_token, $"client-{i}", timeoutMs: 15_000, pipeName: _pipeName);
+                try
+                {
+                    await c.ConnectAsync(_token, $"client-{i}", timeoutMs: 15_000, pipeName: _pipeName);
+                }
+                catch (Exception ex)
+                {
+                    throw new Xunit.Sdk.XunitException(
+                        $"client #{i} failed to connect: {ex.Message} — " +
+                        $"server reports ConnectedCount={_server.ConnectedCount}");
+                }
                 clients.Add(c);
             }
             var tasks = clients.Select(async (c, i) =>

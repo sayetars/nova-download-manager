@@ -83,19 +83,24 @@ public sealed class IpcServer : IAsyncDisposable
                         PipeOptions.Asynchronous);
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // Pipe name taken by a previous instance winding down — retry briefly.
+                // T-026: this was a silent black hole — now logged so CI can see it.
+                EngineLog.Warn($"ipc[{_pipeName}]: instance create failed: {ex.Message}");
                 await Task.Delay(500, ct);
                 continue;
             }
 
             try
             {
+                EngineLog.Info($"ipc[{_pipeName}]: listening (instances now waiting)");
                 await pipe.WaitForConnectionAsync(ct);
             }
             catch (OperationCanceledException) { pipe.Dispose(); break; }
             catch (IOException) { pipe.Dispose(); continue; }
+
+            EngineLog.Info($"ipc[{_pipeName}]: connection accepted");
 
             var conn = new IpcConnection(pipe, _handler, _expectedToken, OnClientGone);
             lock (_connLock) _connections.Add(conn);
