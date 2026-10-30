@@ -139,7 +139,7 @@ void PipeBridge::HandleMethodCall(
     HANDLE p = CreateFileW((L"\\\\.\\pipe\\" + wide).c_str(), GENERIC_READ | GENERIC_WRITE, 0,
                           nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
     if (p == INVALID_HANDLE_VALUE) {
-      result->Return(flutter::EncodableValue(false));
+      result->Success(flutter::EncodableValue(false));
       return;
     }
     DWORD mode = PIPE_READMODE_BYTE;
@@ -151,7 +151,7 @@ void PipeBridge::HandleMethodCall(
     }
     reading_.store(true);
     StartReader();
-    result->Return(flutter::EncodableValue(true));
+    result->Success(flutter::EncodableValue(true));
   } else if (method == "send") {
     const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
     if (!args) {

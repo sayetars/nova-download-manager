@@ -42,7 +42,7 @@ bool FlutterWindow::OnCreate() {
   // method channel "nova/dnd" as a call to "onDrop" with a string list.
   dnd_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       flutter_controller_->engine()->messenger(), "nova/dnd",
-      &flutter::StandardMethodCodec::instance());
+      &flutter::StandardMethodCodec::GetInstance());
   DragAcceptFiles(GetHandle(), TRUE);
 
   // v1.8.0 (IDM tray parity): "nova/tray" — init creates the tray icon,
@@ -50,7 +50,7 @@ bool FlutterWindow::OnCreate() {
   // Dart via "onTrayShow" / "onTrayExit".
   tray_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       flutter_controller_->engine()->messenger(), "nova/tray",
-      &flutter::StandardMethodCodec::instance());
+      &flutter::StandardMethodCodec::GetInstance());
   tray_channel_->SetMethodCallHandler(
       [this](const flutter::MethodCall<flutter::EncodableValue>& call,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
@@ -73,7 +73,7 @@ bool FlutterWindow::OnCreate() {
   // with a single file path (or a list) begins a native OLE drag (CF_HDROP).
   dragout_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       flutter_controller_->engine()->messenger(), "nova/dragout",
-      &flutter::StandardMethodCodec::instance());
+      &flutter::StandardMethodCodec::GetInstance());
   dragout_channel_->SetMethodCallHandler(
       [this](const flutter::MethodCall<flutter::EncodableValue>& call,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
@@ -278,24 +278,86 @@ class NovaDropSource : public IDropSource {
   }
 };
 
+// T-026: the CI Windows SDK hides the DROPFILES struct (and SHCreateStdEnumFmtEtc)
+// behind shell-header exclusion macros we cannot see from this translation unit
+// (DragAcceptFiles/DragQueryFileW/WM_DROPFILES all resolve; the struct does not).
+// NovaDropFiles is the exact 20-byte _DROPFILES layout from shellapi.h — the CF_HDROP
+// global must start with it, then the double-null-terminated wide path list.
+struct NovaDropFiles {
+  DWORD pFiles;  // offset of the path list from the start of the struct
+  POINT pt;      // drop point (screen coords)
+  BOOL fNC;      // non-client area flag
+  BOOL fWide;    // TRUE = wide (UTF-16) paths
+};
+static_assert(sizeof(NovaDropFiles) == 20, "CF_HDROP header must be 20 bytes");
+
+// Minimal IEnumFORMATETC over one static FORMATETC — replaces SHCreateStdEnumFmtEtc
+// (same visibility problem as DROPFILES; ~40 lines of COM boilerplate instead).
+class NovaFmtEtcEnum : public IEnumFORMATETC {
+  LONG ref_ = 1;
+  ULONG idx_ = 0;
+  const FORMATETC* fmt_;
+  ULONG count_;
+
+ public:
+  NovaFmtEtcEnum(const FORMATETC* fmt, ULONG count) : fmt_(fmt), count_(count) {}
+
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+    if (!ppv) return E_POINTER;
+    if (riid == IID_IUnknown || riid == IID_IEnumFORMATETC) {
+      *ppv = static_cast<IEnumFORMATETC*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *ppv = nullptr;
+    return E_NOINTERFACE;
+  }
+  ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&ref_); }
+  ULONG STDMETHODCALLTYPE Release() override {
+    ULONG r = InterlockedDecrement(&ref_);
+    if (r == 0) delete this;
+    return r;
+  }
+  HRESULT STDMETHODCALLTYPE Next(ULONG celt, FORMATETC* rg, ULONG* fetched) override {
+    if (fetched) *fetched = 0;
+    if (!rg) return E_POINTER;
+    ULONG n = 0;
+    while (n < celt && idx_ < count_) rg[n++] = fmt_[idx_++];
+    if (fetched) *fetched = n;
+    return n == celt ? S_OK : S_FALSE;
+  }
+  HRESULT STDMETHODCALLTYPE Skip(ULONG celt) override {
+    idx_ += celt;
+    return idx_ <= count_ ? S_OK : S_FALSE;
+  }
+  HRESULT STDMETHODCALLTYPE Reset() override { idx_ = 0; return S_OK; }
+  HRESULT STDMETHODCALLTYPE Clone(IEnumFORMATETC** pp) override {
+    if (!pp) return E_POINTER;
+    auto* c = new NovaFmtEtcEnum(fmt_, count_);
+    c->idx_ = idx_;
+    *pp = c;
+    return S_OK;
+  }
+};
+
 class NovaHdropDataObject : public IDataObject {
   LONG ref_ = 1;
-  HGLOBAL block_ = nullptr;  // DROPFILES + double-null-terminated wide paths
+  HGLOBAL block_ = nullptr;  // NovaDropFiles + double-null-terminated wide paths
 
   static HGLOBAL BuildDropFiles(const std::vector<std::wstring>& files) {
     size_t chars = 2;  // final double NUL
     for (const auto& f : files) chars += f.size() + 1;
-    const size_t bytes = sizeof(DROPFILES) + chars * sizeof(wchar_t);
+    const size_t bytes = sizeof(NovaDropFiles) + chars * sizeof(wchar_t);
     HGLOBAL g = GlobalAlloc(GHND, bytes);
     if (!g) return nullptr;
-    auto* df = static_cast<DROPFILES*>(GlobalLock(g));
+    auto* df = static_cast<NovaDropFiles*>(GlobalLock(g));
     if (!df) {
       GlobalFree(g);
       return nullptr;
     }
-    df->pFiles = sizeof(DROPFILES);
+    df->pFiles = sizeof(NovaDropFiles);
     df->fWide = TRUE;
-    auto* out = reinterpret_cast<wchar_t*>(reinterpret_cast<BYTE*>(df) + sizeof(DROPFILES));
+    auto* out = reinterpret_cast<wchar_t*>(reinterpret_cast<BYTE*>(df) + sizeof(NovaDropFiles));
     for (const auto& f : files) {
       wcscpy_s(out, f.size() + 1, f.c_str());
       out += f.size() + 1;
@@ -352,7 +414,8 @@ class NovaHdropDataObject : public IDataObject {
     if (!pp) return E_POINTER;
     if (direction != DATADIR_GET) return E_NOTIMPL;
     static FORMATETC supported = {CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
-    return SHCreateStdEnumFmtEtc(1, &supported, pp);
+    *pp = new NovaFmtEtcEnum(&supported, 1);
+    return S_OK;
   }
   HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC*, DWORD, IAdviseSink*, DWORD*) override { return OLE_E_ADVISENOTSUPPORTED; }
   HRESULT STDMETHODCALLTYPE DUnadvise(DWORD) override { return OLE_E_ADVISENOTSUPPORTED; }
