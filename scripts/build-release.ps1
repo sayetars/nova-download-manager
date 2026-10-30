@@ -31,8 +31,8 @@ Push-Location "$root\extensions"
 npm install
 npm run package
 Pop-Location
-Copy-Item "$root\extensions\chromium\nova-chromium-1.0.0.zip" "$root\installer\payload\ext\"
-Copy-Item "$root\extensions\firefox\nova-firefox-1.0.0.zip" "$root\installer\payload\ext\"
+Copy-Item "$root\extensions\chromium\nova-chromium-*.zip" "$root\installer\payload\ext\"
+Copy-Item "$root\extensions\firefox\nova-firefox-*.zip" "$root\installer\payload\ext\"
 Copy-Item -Recurse "$root\extensions\chromium\dist" "$root\installer\payload\ext\chromium"
 Copy-Item -Recurse "$root\extensions\firefox\dist" "$root\installer\payload\ext\firefox"
 

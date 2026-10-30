@@ -53,9 +53,9 @@ Source: "payload\engine\NovaBrowserHost.exe"; DestDir: "{app}\engine"; Flags: ig
 Source: "payload\engine\NovaBrowserHost.dll"; DestDir: "{app}\engine"; Flags: ignoreversion
 ; Native messaging host manifest (path patched at install time)
 Source: "payload\hosts\com.nova.downloadmanager.chromium.json"; DestDir: "{app}\hosts"; Flags: ignoreversion
-; Browser extension packages
-Source: "payload\ext\nova-chromium-1.0.0.zip"; DestDir: "{app}\extensions"; Flags: ignoreversion
-Source: "payload\ext\nova-firefox-1.0.0.zip"; DestDir: "{app}\extensions"; Flags: ignoreversion
+; Browser extension packages (wildcards — version.json is the single source of truth)
+Source: "payload\ext\nova-chromium-*.zip"; DestDir: "{app}\extensions"; Flags: ignoreversion
+Source: "payload\ext\nova-firefox-*.zip"; DestDir: "{app}\extensions"; Flags: ignoreversion
 Source: "payload\ext\chromium\*"; DestDir: "{app}\extensions\chromium"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "payload\ext\firefox\*"; DestDir: "{app}\extensions\firefox"; Flags: ignoreversion recursesubdirs createallsubdirs
 

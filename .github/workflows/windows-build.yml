@@ -103,18 +103,25 @@ jobs:
         shell: cmd
         run: choco install innosetup -y --no-progress
 
-      - name: Copy engine beside the UI (installer layout)
+      - name: Assemble installer payload
         shell: pwsh
         run: |
-          # nova-installer.iss expects the engine next to the compiled UI — mirror it
-          New-Item -ItemType Directory -Force -Path dist\engine, dist\browserhost, dist\cli, dist\extensions
-          Copy-Item publish\win-x64\engine\* dist\engine\ -Recurse
-          Copy-Item publish\win-x64\browserhost\* dist\browserhost\ -Recurse
-          Copy-Item publish\win-x64\cli\* dist\cli\ -Recurse
-          Copy-Item apps\nova_desktop\build\windows\x64\runner\Release\* dist\ -Recurse
-          # wildcard names: version comes from version.json (scripts/sync_versions.py audit)
-          Copy-Item extensions\chromium\nova-chromium-*.zip dist\extensions\
-          Copy-Item extensions\firefox\nova-firefox-*.zip dist\extensions\
+          # Layout contract from scripts/build-release.ps1 (installer\payload\*)
+          $p = 'installer\payload'
+          New-Item -ItemType Directory -Force -Path "$p\app", "$p\engine", "$p\ext", "$p\hosts" | Out-Null
+          # Flutter UI (compiled in the previous step)
+          Copy-Item -Recurse -Force apps\nova_desktop\build\windows\x64\runner\Release\* "$p\app\"
+          # Engine + browser host (self-contained win-x64)
+          Copy-Item publish\win-x64\engine\* "$p\engine\" -Recurse
+          Copy-Item publish\win-x64\browserhost\* "$p\engine\" -Recurse
+          # Extensions: versioned zips (wildcards — version.json is the SSOT) + unpacked dist
+          Copy-Item extensions\chromium\nova-chromium-*.zip "$p\ext\"
+          Copy-Item extensions\firefox\nova-firefox-*.zip "$p\ext\"
+          Copy-Item -Recurse -Force extensions\chromium\dist "$p\ext\chromium"
+          Copy-Item -Recurse -Force extensions\firefox\dist "$p\ext\firefox"
+          # Native messaging host manifests (path patched at install time)
+          Copy-Item extensions\com.nova.downloadmanager.chromium.template.json "$p\hosts\com.nova.downloadmanager.chromium.json"
+          Copy-Item extensions\com.nova.downloadmanager.firefox.template.json "$p\hosts\com.nova.downloadmanager.firefox.json"
 
       - name: Build installer (iscc)
         shell: cmd
