@@ -1090,7 +1090,17 @@ public sealed class TaskRunner
         Security.PgpVerifyOutcome outcome;
         try
         {
-            var data = await File.ReadAllBytesAsync(file.TempPath, ct);
+            // FileShare.ReadWrite (T-026): the temp is still held open by the
+            // DownloadDataFile writer; File.ReadAllBytesAsync (FileShare.Read)
+            // collides with it on Windows and fails the verify with io_error.
+            byte[] data;
+            await using (var fs = new FileStream(file.TempPath, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                using var ms = new MemoryStream();
+                await fs.CopyToAsync(ms, ct);
+                data = ms.ToArray();
+            }
             var keyring = _pgpKeys?.ArmoredKeys() ?? new List<string>();
             outcome = Security.PgpVerifier.VerifyDetached(data, task.PgpSignature, keyring);
         }
@@ -1377,7 +1387,9 @@ public sealed class TaskRunner
 
     internal static async Task<string> Sha256FileAsync(string path, CancellationToken ct)
     {
-        await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+        // FileShare.ReadWrite — see Hashing.ComputeAsync (T-026): must tolerate the
+        // concurrent DownloadDataFile writer on Windows.
+        await using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
             bufferSize: 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
         using var sha = SHA256.Create();
         var hash = await sha.ComputeHashAsync(fs, ct);

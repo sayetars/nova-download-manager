@@ -100,11 +100,31 @@ public sealed class ClientCertificateService
             "pfx" when File.Exists(b.CertPath) =>
                 new X509Certificate2(b.CertPath, passphrase),
             "pem" when File.Exists(b.CertPath) =>
-                X509Certificate2.CreateFromPemFile(b.CertPath,
-                    string.IsNullOrEmpty(b.KeyPath) ? null : b.KeyPath),
+                WithWindowsUsableKey(X509Certificate2.CreateFromPemFile(b.CertPath,
+                    string.IsNullOrEmpty(b.KeyPath) ? null : b.KeyPath)),
             "store" => FromStore(b),
             _ => null,
         };
+    }
+
+    /// <summary>T-026 (Windows): CreateFromPemFile yields an ephemeral private key,
+    /// which SChannel refuses during TLS client authentication (the handshake dies
+    /// with "unexpected EOF"). Round-tripping through PFX gives the key a handle
+    /// SChannel can use. No-op on POSIX.</summary>
+    private static X509Certificate2 WithWindowsUsableKey(X509Certificate2 cert)
+    {
+        if (!OperatingSystem.IsWindows() || !cert.HasPrivateKey) return cert;
+        try
+        {
+            var pfx = cert.Export(X509ContentType.Pfx);
+            var usable = new X509Certificate2(pfx);
+            cert.Dispose();
+            return usable;
+        }
+        catch
+        {
+            return cert; // best effort — hand back the original
+        }
     }
 
     private static X509Certificate2? FromStore(ClientCertBinding b)

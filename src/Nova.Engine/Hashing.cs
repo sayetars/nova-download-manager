@@ -41,7 +41,12 @@ public static class Hashing
 
     public static async Task<string> ComputeAsync(string filePath, string algo, CancellationToken ct)
     {
-        await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+        // FileShare.ReadWrite (T-026): verification runs while the DownloadDataFile
+        // writer still holds the temp open. On Windows a plain FileShare.Read open
+        // conflicts with the existing Write handle ("being used by another process")
+        // and sends every hash-verified download into the retry loop. The write side
+        // is already quiescent at verify time — all segments are done.
+        await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
             bufferSize: 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
         return await ComputeAsync(fs, algo, ct);
     }

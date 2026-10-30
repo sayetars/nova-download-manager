@@ -46,12 +46,18 @@ public sealed class IpcServer : IAsyncDisposable
     {
         if (_started) return;
         _started = true;
-        _acceptLoop = Task.Run(AcceptLoopAsync);
+        // T-026 (Windows): named pipes have NO kernel backlog — a client connecting
+        // while the single accept loop is between instances gets "all pipe instances
+        // busy" and times out (Linux UDS queues connects, which is why one loop was
+        // enough locally). Run a small pool of concurrent accept loops so several
+        // instances are always waiting; Protocol.MaxConnections still caps the total.
+        var loops = Math.Min(4, Math.Max(1, Protocol.MaxConnections));
+        _acceptLoop = Task.WhenAll(Enumerable.Range(0, loops)
+            .Select(_ => Task.Run(() => AcceptLoopAsync(_cts.Token))));
     }
 
-    private async Task AcceptLoopAsync()
+    private async Task AcceptLoopAsync(CancellationToken ct)
     {
-        var ct = _cts.Token;
         while (!ct.IsCancellationRequested)
         {
             NamedPipeServerStream pipe;

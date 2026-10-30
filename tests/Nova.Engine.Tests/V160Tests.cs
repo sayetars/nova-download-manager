@@ -231,26 +231,6 @@ public class V160Tests : IAsyncLifetime
     }
 
     // ------------------------------------------------------------ yt-dlp runner E2E (fake binary)
-    /// <summary>Writes a fake yt-dlp executable for the current OS: a POSIX shell script
-    /// on Linux/macOS, a batch file on Windows (T-026: the .sh variant cannot execute on
-    /// Windows runners — "not a valid application for this OS platform").</summary>
-    private async Task<string> WriteFakeYtDlpAsync(string name, string shBody, string cmdBody)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            var sh = Path.Combine(_tmp, name + ".sh");
-            await File.WriteAllTextAsync(sh, shBody);
-            var chmod = Process.Start("chmod", "+x " + sh);
-            Assert.NotNull(chmod);
-            Assert.True(chmod!.WaitForExit(5000));
-            Assert.Equal(0, chmod.ExitCode);
-            return sh;
-        }
-        var cmd = Path.Combine(_tmp, name + ".cmd");
-        await File.WriteAllTextAsync(cmd, cmdBody);
-        return cmd;
-    }
-
     [Fact]
     public async Task YtDlpRunner_FakeBinary_Merges_Two_Phases_And_Reports_Progress()
     {
@@ -280,17 +260,20 @@ public class V160Tests : IAsyncLifetime
             cat "$f1" "$f2" > "$merged"
             exit 0
             """;
-        // Windows variant: identical behaviour in batch (% doubled; fsutil makes the
-        // exact-size zero files; copy /b concatenates). ".%(ext)s" is 7 trailing chars.
+        // Windows variant: same behaviour in batch. Args are parsed with a SHIFT loop
+        // (a ")" inside the ".%(ext)s" template would break FOR-set parsing); "%%" is a
+        // literal percent in .cmd files; fsutil makes exact-size zero files; copy /b
+        // concatenates. ".%(ext)s" is the 7-char suffix stripped from the -o value.
         const string cmd = """
             @echo off
             setlocal enabledelayedexpansion
             set "out="
-            set "prev="
-            for %%a in (%*) do (
-              if "!prev!"=="-o" set "out=%%a"
-              set "prev=%%a"
-            )
+            :parse
+            if "%~1"=="" goto parsed
+            if "%~1"=="-o" set "out=%~2"
+            shift
+            goto parse
+            :parsed
             set "base=!out:~0,-7!"
             set "f1=!base!.f137.mp4"
             set "f2=!base!.f251.m4a"
@@ -308,7 +291,7 @@ public class V160Tests : IAsyncLifetime
             endlocal
             exit /b 0
             """;
-        var bin = await WriteFakeYtDlpAsync("fake-ytdlp", sh, cmd);
+        var bin = await FakeBinary.WriteAsync(_tmp, "fake-ytdlp", sh, cmd);
 
         var dest = Path.Combine(_tmp, "dest");
         Directory.CreateDirectory(dest);
@@ -352,7 +335,7 @@ public class V160Tests : IAsyncLifetime
             echo ERROR: unable to download video data: HTTP Error 403: Forbidden 1>&2
             exit /b 1
             """;
-        var bin = await WriteFakeYtDlpAsync("fake-ytdlp-fail", sh, cmd);
+        var bin = await FakeBinary.WriteAsync(_tmp, "fake-ytdlp-fail", sh, cmd);
 
         var task = new DownloadTask
         {

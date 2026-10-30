@@ -221,16 +221,10 @@ public sealed class V150YtDlpTests
         Assert.True(info.IsLive); // bridge turns this into live_stream error before returning
     }
 
-    private static string MakeFakeBinary(string name, string body)
+    private static async Task<string> MakeFakeBinaryAsync(string name, string shBody, string cmdBody)
     {
         var dir = Path.Combine(Path.GetTempPath(), "nova-ytdlp-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-        var p = Path.Combine(dir, name);
-        File.WriteAllText(p, body);
-        File.SetUnixFileMode(p,
-            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-            UnixFileMode.GroupRead | UnixFileMode.GroupExecute);
-        return p;
+        return await FakeBinary.WriteAsync(dir, name, shBody, cmdBody);
     }
 
     [Fact]
@@ -238,11 +232,26 @@ public sealed class V150YtDlpTests
     {
         var jsonFile = Path.Combine(Path.GetTempPath(), "nova-" + Guid.NewGuid().ToString("N") + ".json");
         await File.WriteAllTextAsync(jsonFile, SampleJson);
-        var bin = MakeFakeBinary("yt-dlp", $"""
+        // POSIX: $1 --version → version; $4 = page URL → dump JSON; else stderr+exit 1.
+        // Windows: %~1/%~4 equivalents (SHIFT-free positional reads are safe here —
+        // the URL has no ")" and no percent).
+        var bin = await MakeFakeBinaryAsync("yt-dlp", $"""
 #!/bin/sh
 if [ "$1" = "--version" ]; then echo "2026.01.01"; exit 0; fi
 if [ "$4" = "https://example.com/watch?v=abc123" ]; then cat "{jsonFile}"; exit 0; fi
 echo "Unsupported URL: $4" >&2; exit 1
+""", $"""
+@echo off
+if "%~1"=="--version" (
+  echo 2026.01.01
+  exit /b 0
+)
+if "%~4"=="https://example.com/watch?v=abc123" (
+  type "{jsonFile}"
+  exit /b 0
+)
+echo Unsupported URL: %~4 1>&2
+exit /b 1
 """);
 
         var bridge = new YtDlpBridge(explicitPath: bin);
@@ -261,7 +270,7 @@ echo "Unsupported URL: $4" >&2; exit 1
     [Fact]
     public async Task YtDlp_ResolveViaFakeBinary_ReturnsUrls()
     {
-        var bin = MakeFakeBinary("yt-dlp", """
+        var bin = await MakeFakeBinaryAsync("yt-dlp", """
 #!/bin/sh
 if [ "$1" = "-f" ] && [ "$2" = "18" ]; then
   echo "https://cdn.example.com/direct/video.mp4?sig=1"
@@ -269,6 +278,16 @@ if [ "$1" = "-f" ] && [ "$2" = "18" ]; then
   exit 0
 fi
 exit 1
+""", """
+@echo off
+if "%~1"=="-f" (
+  if "%~2"=="18" (
+    echo https://cdn.example.com/direct/video.mp4?sig=1
+    echo https://cdn.example.com/direct/audio.m4a?sig=1
+    exit /b 0
+  )
+)
+exit /b 1
 """);
         var bridge = new YtDlpBridge(explicitPath: bin);
         var urls = await bridge.ResolveAsync("https://example.com/watch?v=abc123", "18", CancellationToken.None);
@@ -476,12 +495,18 @@ public sealed class V150ClientCertTests
         using var serverRsa = RSA.Create(2048);
         var serverReq = new CertificateRequest("CN=127.0.0.1", serverRsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         serverReq.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        // T-026: EKUs are mandatory on Windows/SChannel (Linux OpenSSL is lenient) —
+        // a TLS handshake with an EKU-less cert dies with "unexpected EOF".
+        serverReq.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }, false)); // serverAuth
         using var serverCertNoKey = serverReq.Create(caCert, caCert.NotBefore, caCert.NotAfter, Guid.NewGuid().ToByteArray());
         var serverCert = serverCertNoKey.CopyWithPrivateKey(serverRsa);
 
         // client cert
         using var clientRsa = RSA.Create(2048);
         var clientReq = new CertificateRequest($"CN={clientCn}", clientRsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        clientReq.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+            new OidCollection { new Oid("1.3.6.1.5.5.7.3.2") }, false)); // clientAuth (T-026)
         var clientCert = clientReq.Create(caCert, caCert.NotBefore, caCert.NotAfter, Guid.NewGuid().ToByteArray());
         var clientWithKey = clientCert.CopyWithPrivateKey(clientRsa);
 

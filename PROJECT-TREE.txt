@@ -1,6 +1,6 @@
 # PROJECT-TREE — Nova Download Manager
-# version v1.8.0 · git 2800157 · 2026-10-30T21:42:39
-# exact file-set carried by the Dropbox source checkpoint (317 files, 2,590,588 bytes uncompressed)
+# version v1.8.0 · git df70ed0 · 2026-10-30T22:01:12
+# exact file-set carried by the Dropbox source checkpoint (318 files, 2,594,713 bytes uncompressed)
 # (regenerate: python3 scripts/gen_project_tree.py)
 
 .env
@@ -357,6 +357,7 @@ tests/
     DownloadDataFileTests.cs
     DownloadEngineTests.cs
     EngineFixture.cs
+    FakeBinary.cs
     IpcAndSchedulerTests.cs
     MediaTests.cs
     Nova.Engine.Tests.csproj
