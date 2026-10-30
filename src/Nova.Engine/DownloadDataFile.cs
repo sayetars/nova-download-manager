@@ -70,6 +70,12 @@ public sealed class DownloadDataFile : IAsyncDisposable
         }
         finally { _ioLock.Release(); }
 
+        // Windows (T-026): File.Move on a file with an open handle fails with a
+        // sharing violation ("being used by another process") — Linux tolerates it,
+        // which is why this never showed locally. Close BEFORE moving. The outer
+        // `await using` DisposeAsync is idempotent, and nothing writes after finalize.
+        await _stream.DisposeAsync();
+
         var target = FilenamePolicy.MakeUniquePath(FinalPath);
         File.Move(TempPath, target, overwrite: false);
         return target;

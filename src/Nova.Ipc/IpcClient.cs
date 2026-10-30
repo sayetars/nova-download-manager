@@ -25,6 +25,11 @@ public sealed class IpcClient : IAsyncDisposable
         _pipe = new NamedPipeClientStream(".", pipeName ?? Protocol.ResolvedPipeName, PipeDirection.InOut,
             PipeOptions.Asynchronous);
         await _pipe.ConnectAsync(timeoutMs);
+        // T-026 (Windows): the handshake reply MUST be time-bounded by the same
+        // budget as the connect — a wedged/half-open pipe otherwise parks the
+        // caller forever (observed as the CI 20-min hang in Bad_Token_Is_Rejected).
+        using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        handshakeCts.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
         await Framing.WriteFrameAsync(_pipe,
             Framing.Encode(new Envelope
             {
@@ -33,9 +38,9 @@ public sealed class IpcClient : IAsyncDisposable
                 Payload = System.Text.Json.JsonSerializer.SerializeToElement(
                     new HelloRequest { Client = clientName, ProtocolVersion = Protocol.Version },
                     Protocol.Json),
-            }), _cts.Token);
+            }), handshakeCts.Token);
 
-        var first = await Framing.ReadFrameAsync(_pipe, _cts.Token);
+        var first = await Framing.ReadFrameAsync(_pipe, handshakeCts.Token);
         var env = Framing.Decode(first);
         if (env is null || env.Type != "ok")
             throw new IpcFramingException($"Handshake rejected: {env?.Type ?? "closed"}");

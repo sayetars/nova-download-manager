@@ -240,6 +240,13 @@ public sealed class IpcConnection : IAsyncDisposable
         finally
         {
             _onClosed(this);
+            // T-026 (Windows): the connection owns its pipe instance — dispose it here,
+            // not only from the server's connection list. RunAsync returning removes the
+            // connection from that list first, so without this the NamedPipeServerStream
+            // handle leaks on every handshake rejection/drop; on Windows leaked instances
+            // exhaust maxNumberOfServerInstances and deadlock later connects.
+            try { await _pipe.DisposeAsync(); } catch { /* already gone */ }
+            _writeLock.Dispose();
         }
     }
 
@@ -277,8 +284,9 @@ public sealed class IpcConnection : IAsyncDisposable
             }
         }
         catch { /* ignore */ }
-        await _pipe.DisposeAsync();
-        _writeLock.Dispose();
+        // Idempotent: RunAsync's finally may already have disposed both.
+        try { await _pipe.DisposeAsync(); } catch { /* already gone */ }
+        try { _writeLock.Dispose(); } catch (ObjectDisposedException) { }
     }
 }
 
