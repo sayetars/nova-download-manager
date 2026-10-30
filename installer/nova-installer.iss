@@ -88,29 +88,44 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
     Flags: uninsdeletevalue; Tasks: autostart
 
 [Code]
+// T-026: LoadStringFromFile's var param is AnsiString and StringChangeEx's is
+// String (official Inno signatures) — convert explicitly between them.
 procedure PatchChromiumHostManifest();
 var
+  src: String;
+  dst: String;
+  exe: String;
+  raw: AnsiString;
   content: String;
-  path: String;
 begin
-  path := ExpandConstant('{localappdata}\Nova\com.nova.downloadmanager.json');
-  // copy template from {app}\hosts and rewrite the exe path
-  if LoadStringFromFile(ExpandConstant('{app}\hosts\com.nova.downloadmanager.chromium.json'), content) then
-  begin
-    StringChangeEx(content, 'C:\Program Files\Nova\NovaBrowserHost.exe',
-                   ExpandConstant('{app}\engine\NovaBrowserHost.exe'), True);
-    SaveStringToFile(path, content, False);
-  end;
+  src := ExpandConstant('{app}\hosts\com.nova.downloadmanager.chromium.json');
+  dst := ExpandConstant('{localappdata}\Nova\com.nova.downloadmanager.json');
+  exe := ExpandConstant('{app}\engine\NovaBrowserHost.exe');
+  if not LoadStringFromFile(src, raw) then Exit;
+  content := raw;
+  StringChangeEx(content, 'C:\Program Files\Nova\NovaBrowserHost.exe', exe, True);
+  raw := content;
+  SaveStringToFile(dst, raw, False);
 end;
 
 procedure InstallFirefoxManifest();
 var
+  src: String;
   dir: String;
+  exe: String;
+  raw: AnsiString;
+  content: String;
 begin
-  dir := ExpandConstant('{userappdata}') + '\mozilla\NativeMessagingHosts';
+  // Firefox needs the allowed_extensions manifest (NOT the chromium one).
+  src := ExpandConstant('{app}\hosts\com.nova.downloadmanager.firefox.json');
+  dir := ExpandConstant('{userappdata}') + '\Mozilla\NativeMessagingHosts';
+  exe := ExpandConstant('{app}\engine\NovaBrowserHost.exe');
   ForceDirectories(dir);
-  FileCopy(ExpandConstant('{app}\hosts\com.nova.downloadmanager.chromium.json'),
-           dir + '\com.nova.downloadmanager.json', False);
+  if not LoadStringFromFile(src, raw) then Exit;
+  content := raw;
+  StringChangeEx(content, '/usr/bin/novabrowserhost', exe, True);
+  raw := content;
+  SaveStringToFile(dir + '\com.nova.downloadmanager.json', raw, False);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
