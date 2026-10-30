@@ -87,7 +87,7 @@ def app_installation_token(creds: dict) -> tuple[str, dict]:
         private_key = f.read()
 
     now = int(time.time())
-    payload = {"iat": now - 60, "exp": now + 300, "iss": int(creds["app_id"])}
+    payload = {"iat": now - 60, "exp": now + 300, "iss": str(creds["app_id"])}
     jwt_token = jwt.encode(payload, private_key, algorithm="RS256")
 
     import requests

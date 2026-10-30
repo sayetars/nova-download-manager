@@ -1,8 +1,8 @@
 # RESUME-POINT — atomic continuation contract
 
-updated: 2026-10-31 (T-025 — GitHub Windows-CI push lane: sanitation + tooling done, push awaits user auth)
+updated: 2026-10-31 (T-025 — GitHub push lane: private key validated, tooling ready; awaiting App installation + repo)
 task: T-025 IN PROGRESS — GitHub push lane
-substep: awaiting user's repo URL + auth credentials (see next)
+substep: awaiting user to create the empty repo AND install the App on it (see next)
 
 done (T-025, this session):
 - Session certificate: UNIVERSAL-RULES.md read (SHA 87de0baa… verified vs
@@ -16,6 +16,19 @@ done (T-025, this session):
   App ID + Client ID alone CANNOT authenticate (GitHub Apps authenticate via
   a JWT signed with the app private key .pem, exchanged for installation
   tokens).
+- User then uploaded the private key (universal-ai-developer.2026-10-30
+  .private-key.pem) → installed at tools/github/app-private-key.pem
+  (chmod 600, gitignored, Dropbox-excluded; never printed/committed).
+  VALIDATED: JWT → GET /app returns 200 — App "Universal-AI-Developer",
+  slug universal-ai-developer, owner sayetars, id 5545710. App permission
+  set verified: contents=write, workflows=write,
+  repository_creation=write (plus ~44 more, all write — broad; optional
+  least-privilege trim possible before install, not required).
+  GET /app/installations → 0 installations (the only missing piece).
+  PyJWT 2.12 fix applied to both scripts (iss must be a string).
+  New script: scripts/github_app_probe.py (validates key↔app, lists
+  installations + permissions + accessible repositories, prints a push
+  readiness checklist; never prints key or token values).
 - SECURITY (D-016): pre-push audit found the LIVE Dropbox credentials
   (APP_KEY/APP_SECRET/REFRESH_TOKEN) hardcoded in git-tracked
   scripts/nova_dropbox_upload.py — a second instance of the D-014 leak class
@@ -46,25 +59,26 @@ done (T-025, this session):
   as above; sync_versions --check PASS.
 
 next:
-1. USER (pick one, then send repo URL):
-   a) GitHub App path: App settings → General → Private keys → Generate a
-      private key (.pem) → send/paste it (saved to
-      tools/github/app-private-key.pem, 600); install the App on the repo
-      (App page → Install App) with Repository permissions
-      Contents=Read and write + Workflows=Read and write.
-   b) PAT path (simplest): classic PAT with repo+workflow scopes.
-   c) Device-flow path (no secrets pasted): enable "Device Flow" in the
-      App settings; session then guides a github.com/login/device code
-      login (still needs the App installed with the same permissions).
-2. Create the target repo (github.com/new — empty, any name; public OK —
-   history is now clean). Send "owner/name".
-3. Session: update .github-credentials.json → `plan` → `push` (main + tags
-   v1.4.0…v1.8.0) → `status --watch` windows-build.yml (audit gate →
-   engine tests on Windows → Flutter UI → extensions → Inno Setup
-   installer → artifacts; v1.8.0 tag push auto-creates the GitHub
-   Release via built-in GITHUB_TOKEN — zero user secrets).
-4. Windows real-machine feedback → v1.8.x PATCH lane.
-5. Future (all free): Linux tray + Linux drag-out, embedded player,
+1. USER (last two clicks — key already validated, permissions verified):
+   a) create the empty repo (github.com/new — any name; public OK, history is
+      clean);
+   b) install the App on it: github.com/apps/universal-ai-developer/
+      installations/new → "Only select repositories" → pick the repo →
+      Install. (Alternative: "All repositories" — then the session can
+      create the repo itself via POST /user/repos since the App holds
+      repository_creation=write.)
+   Then the user sends the repo name (owner/name).
+2. Session: write repo into tools/github/.github-credentials.json →
+   `python3 scripts/github_app_probe.py` (verify installation + perms +
+   repo access) → `python3 scripts/github_release_push.py plan` →
+   `push` (main + tags v1.4.0…v1.8.0) → `status --watch`
+   windows-build.yml (audit gate → engine tests on Windows → Flutter UI →
+   extensions → Inno Setup installer → artifacts; the v1.8.0 tag push
+   auto-creates the GitHub Release via built-in GITHUB_TOKEN — zero user
+   secrets). Windows CI takes ~20-40 min; poll with `status` (plain) in
+   timeout-bounded chunks (`timeout 580 python3 … status --watch`).
+3. Windows real-machine feedback → v1.8.x PATCH lane.
+4. Future (all free): Linux tray + Linux drag-out, embedded player,
    arbitrary non-modifier special keys, CWS/AMO publishing (D-013).
 
 evidence:
