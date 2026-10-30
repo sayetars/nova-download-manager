@@ -33,7 +33,9 @@ LicenseFile=LICENSE.txt
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "fa"; MessagesFile: "compiler:Languages\Farsi.isl"
+; Vendored from the official jrsoftware translations (Files/Languages/Unofficial,
+; "Inno Setup version 6.5.0+ Farsi messages") — Inno Setup does not ship Farsi.
+Name: "fa"; MessagesFile: "languages\Farsi.isl"
 
 [CustomMessages]
 en.CreateDesktopIcon=Create a &desktop shortcut
