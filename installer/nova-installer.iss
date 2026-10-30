@@ -144,7 +144,7 @@ Type: files; Name: "{localappdata}\Nova\com.nova.downloadmanager.json"
 
 [UninstallRun]
 ; stop the background engine (graceful: it persists state)
-Filename: "{app}\engine\NovaEngine.exe"; Parameters: ""; RunOnceId: "StopEngine"; Flags: runhidden; BeforeInstall: none
+Filename: "{app}\engine\NovaEngine.exe"; Parameters: ""; RunOnceId: "StopEngine"; Flags: runhidden
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchAfter}"; Flags: nowait postinstall skipifsilent
