@@ -66,9 +66,16 @@ public sealed class IpcServer : IAsyncDisposable
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
                     // ACL: current user only — other local accounts cannot connect.
+                    // T-026: FullControl, not bare ReadWrite — Windows checks the
+                    // FIRST instance's DACL for the CreatePipeInstance right when
+                    // spawning ADDITIONAL instances; a ReadWrite-only ACE made every
+                    // second Create fail with "Access to the path is denied", so the
+                    // engine could serve exactly ONE connection per pipe on Windows
+                    // (CI trace: Concurrent_Clients starved, loops retrying forever).
+                    // The boundary stays "current user only".
                     var acl = new PipeSecurity();
                     acl.AddAccessRule(new PipeAccessRule(
-                        WindowsIdentityGetter.Current, PipeAccessRights.ReadWrite,
+                        WindowsIdentityGetter.Current, PipeAccessRights.FullControl,
                         System.Security.AccessControl.AccessControlType.Allow));
                     pipe = NamedPipeServerStreamAcl.Create(
                         _pipeName, PipeDirection.InOut,
