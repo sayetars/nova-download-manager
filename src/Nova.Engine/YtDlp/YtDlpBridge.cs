@@ -271,8 +271,15 @@ public sealed class YtDlpBridge
 
     // ---- process plumbing --------------------------------------------------------
 
+    /// <summary>Quotes an argument for the raw Arguments string. T-026: on Windows
+    /// we ALWAYS quote — cmd.exe (and any .cmd/.bat wrapper around yt-dlp) splits
+    /// unquoted arguments on '=', ';' and ',' too, which mangled URLs like
+    /// "...watch?v=abc123" into two argv entries. CRT-parsed binaries (yt-dlp.exe)
+    /// accept quoted args identically, so this is safe everywhere on Windows.</summary>
     private static string Quote(string s) =>
-        s.Contains(' ') || s.Contains('\"') ? "\"" + s.Replace("\"", "\\\"") + "\"" : s;
+        OperatingSystem.IsWindows() || s.Contains(' ') || s.Contains('\"')
+            ? "\"" + s.Replace("\"", "\\\"") + "\""
+            : s;
 
     private static (string Stdout, string Stderr, int ExitCode) Run(string bin, string args, int timeoutMs)
         => RunAsync(bin, args, timeoutMs, CancellationToken.None).GetAwaiter().GetResult();

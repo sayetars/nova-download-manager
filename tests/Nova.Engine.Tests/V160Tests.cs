@@ -274,7 +274,8 @@ public class V160Tests : IAsyncLifetime
             shift
             goto parse
             :parsed
-            set "base=!out:~0,-7!"
+            rem ".%(ext)s" is EIGHT trailing chars: . % ( e x t ) s
+            set "base=!out:~0,-8!"
             set "f1=!base!.f137.mp4"
             set "f2=!base!.f251.m4a"
             set "merged=!base!.mp4"

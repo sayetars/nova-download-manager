@@ -79,7 +79,10 @@ public class IpcTests : IAsyncLifetime
             for (var i = 0; i < 4; i++)
             {
                 var c = new IpcClient();
-                await c.ConnectAsync(_token, $"client-{i}", pipeName: _pipeName);
+                // T-026: 15s budget — under full-suite parallel load on 2-4 vCPU CI
+                // runners the client-side connect retry loop can miss the default 4s
+                // window (Windows named pipes have no kernel backlog to queue into).
+                await c.ConnectAsync(_token, $"client-{i}", timeoutMs: 15_000, pipeName: _pipeName);
                 clients.Add(c);
             }
             var tasks = clients.Select(async (c, i) =>
