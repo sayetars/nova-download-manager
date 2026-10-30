@@ -12,6 +12,10 @@ tools/dropbox/.dropbox-credentials.json
 tools/dropbox/.access-token.json
 *.access-token.json
 
+# GitHub secrets (T-025) — never commit, never archive
+tools/github/.github-credentials.json
+tools/github/*.pem
+
 # Build artifacts
 **/bin/
 **/obj/
@@ -47,3 +51,4 @@ tools/llvm*/
 # parallel-tree guard (D-012/D-014): the v0.1.0 nova/ tree must never return
 nova/
 
+__pycache__/

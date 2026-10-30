@@ -40,10 +40,12 @@ STATE_DOCS = [
     "PROJECT-RULES.md", "UNIVERSAL-RULES.md", "CLOUD-POLICY.md",
     "PROJECT-TREE.txt",
 ]
-EXCLUDE_NAMES = {".dropbox-credentials.json", ".access-token.json"}
+EXCLUDE_NAMES = {".dropbox-credentials.json", ".access-token.json",
+                  ".github-credentials.json"}
 EXCLUDE_DIRS = {"sdk", "node_modules", "upload", "download", "skills",
                 ".backup-tmp", "__pycache__", "publish", "tool-results"}
-EXCLUDE_SUFFIXES = (".db", ".db-shm", ".db-wal", ".novadl", ".log", ".part")
+EXCLUDE_SUFFIXES = (".db", ".db-shm", ".db-wal", ".novadl", ".log", ".part",
+                    ".pem", ".private-key")
 # CLOUD-POLICY guards (user directive 2026-10-28): the checkpoint must stay lean.
 MAX_FILE_BYTES = 10 * 1024 * 1024     # no single archived file > 10 MiB
 MAX_ARCHIVE_BYTES = 60 * 1024 * 1024  # sanity ceiling for the whole checkpoint

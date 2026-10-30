@@ -1,6 +1,6 @@
 # PROJECT-TREE — Nova Download Manager
-# version v1.8.0 · git fdba99f · 2026-10-30T16:09:49
-# exact file-set carried by the Dropbox source checkpoint (308 files, 2,555,856 bytes uncompressed)
+# version v1.8.0 · git 08a6be3 · 2026-10-30T18:32:42
+# exact file-set carried by the Dropbox source checkpoint (314 files, 2,598,518 bytes uncompressed)
 # (regenerate: python3 scripts/gen_project_tree.py)
 
 .env
@@ -35,6 +35,7 @@ apps/
       app.dart
       core/
         build_version.dart
+        drag_out.dart
         engine_client.dart
         models.dart
         protocol.dart
@@ -152,6 +153,7 @@ extensions/
     nova-chromium-1.5.0.zip.sha256
     nova-chromium-1.7.0.zip.sha256
     nova-chromium-1.7.1.zip.sha256
+    nova-chromium-1.8.0.zip.sha256
     src/
       background.ts
       content.ts
@@ -178,6 +180,7 @@ extensions/
     nova-firefox-1.5.0.zip.sha256
     nova-firefox-1.7.0.zip.sha256
     nova-firefox-1.7.1.zip.sha256
+    nova-firefox-1.8.0.zip.sha256
     src/
       background.ts
       content.ts
@@ -216,6 +219,7 @@ scripts/
   flutter-url.txt
   free_audit.py
   gen_project_tree.py
+  github_release_push.py
   linux/
     bootstrap_toolchain.sh
     demo_download_shot.sh
@@ -229,7 +233,6 @@ scripts/
     smoke_test.sh
     tarball_cleanenv_test.sh
     ui_smoke.sh
-  nova_dropbox_upload.py
   sync_versions.py
   upload_v120_dropbox.py
   vlm_mini_check.py
@@ -301,6 +304,7 @@ src/
       YtDlpRunner.cs
     ZipPreview.cs
   Nova.EngineHost/
+    AutoStartRegister.cs
     EngineHostApp.cs
     IpcMessageRouter.cs
     JsonRpcServer.cs
@@ -363,6 +367,7 @@ tests/
     V150Tests.cs
     V160Tests.cs
     V170Tests.cs
+    V180CompletionTests.cs
     V180Tests.cs
 tools/
   dropbox/
@@ -370,5 +375,7 @@ tools/
     dropbox.py
     inventory.py
     restore.py
+  github/
+    README.md
 version.json
 worklog.md
