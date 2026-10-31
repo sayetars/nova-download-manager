@@ -1,94 +1,67 @@
 # RESUME-POINT — atomic continuation contract
 
-updated: 2026-10-31 (T-025 — GitHub push lane: private key validated, tooling ready; awaiting App installation + repo)
-task: T-025 IN PROGRESS — GitHub push lane
-substep: awaiting user to create the empty repo AND install the App on it (see next)
+updated: 2026-10-31 (T-026 — Windows CI bring-up COMPLETE: full-green run + live GitHub Release v1.8.0)
+task: NONE OPEN — T-026 shipped; awaiting real-Windows install feedback
+substep: —
 
-done (T-025, this session):
-- Session certificate: UNIVERSAL-RULES.md read (SHA 87de0baa… verified vs
-  ledger), T-025 recorded in RULES-READ-LEDGER.md. Version floor verified
-  FIRST: v1.8.0 (VERSIONS.md + git tag v1.8.0 + clean status) — T-024
-  (IDM full-parity) was already COMPLETE when this session started; nothing
-  re-implemented (D-012 discipline).
-- User sent GitHub App credentials: App ID 5545710, Client ID Iv23li….
-  Recorded in tools/github/.github-credentials.json (chmod 600, gitignored).
-  OAuth device-flow probe with the Client ID → HTTP 400 device_flow_disabled:
-  App ID + Client ID alone CANNOT authenticate (GitHub Apps authenticate via
-  a JWT signed with the app private key .pem, exchanged for installation
-  tokens).
-- User then uploaded the private key (universal-ai-developer.2026-10-30
-  .private-key.pem) → installed at tools/github/app-private-key.pem
-  (chmod 600, gitignored, Dropbox-excluded; never printed/committed).
-  VALIDATED: JWT → GET /app returns 200 — App "Universal-AI-Developer",
-  slug universal-ai-developer, owner sayetars, id 5545710. App permission
-  set verified: contents=write, workflows=write,
-  repository_creation=write (plus ~44 more, all write — broad; optional
-  least-privilege trim possible before install, not required).
-  GET /app/installations → 0 installations (the only missing piece).
-  PyJWT 2.12 fix applied to both scripts (iss must be a string).
-  New script: scripts/github_app_probe.py (validates key↔app, lists
-  installations + permissions + accessible repositories, prints a push
-  readiness checklist; never prints key or token values).
-- SECURITY (D-016): pre-push audit found the LIVE Dropbox credentials
-  (APP_KEY/APP_SECRET/REFRESH_TOKEN) hardcoded in git-tracked
-  scripts/nova_dropbox_upload.py — a second instance of the D-014 leak class
-  (that purge only inspected the nested nova/ repo). The file was dead
-  legacy (ROOT pointed at the purged nova/ tree; artifact removed in
-  D-014). Purged the path from ALL history via git-filter-repo
-  --invert-paths: 40 commits preserved, 6 tags (v1.4.0…v1.8.0) migrated to
-  rewritten SHAs (HEAD 3c2643f → 08a6be3), git fsck clean, zero
-  credential-string hits anywhere in history, sync --check PASS, working
-  tree unchanged apart from the removed file. scripts/__pycache__/*.pyc
-  untracked + __pycache__/ gitignored. NOTE: SHA references in older
-  memory docs are now narrative labels (documented in D-016 tradeoff).
-- Tooling: scripts/github_release_push.py (plan / push [--force] /
-  status [--watch]; auth = GitHub-App JWT→installation-token OR classic PAT;
-  pre-push tracked-tree secrets scan aborts on token/PEM-like strings; push
-  authorized via `git -c http.extraheader` so tokens never enter
-  .git/config). tools/github/README.md documents the credentials format;
-  .gitignore + tools/dropbox/backup.py excludes extended so
-  .github-credentials.json / *.pem / *.private-key are never committed or
-  archived. PROJECT-TREE.txt regenerated.
-- Process lesson recorded: `restore.py state` refreshes ALL STATE_DOCS from
-  the cloud — run it BEFORE editing memory docs, never after (this session
-  lost one round of ledger/DECISIONS/STATE edits to it and re-applied them).
-- Verification this session: python3 -m py_compile OK; guard-path test
-  (plan without .pem → exact fix guidance, exit 1); secrets-audit PASS on
-  the tracked tree (one false positive fixed: loose slack-token regex
-  matched ssl.AuthenticateAsServerAsync); git fsck/rev-list/tag/-S scans
-  as above; sync_versions --check PASS.
+done (T-026, this session — 13 evidence-driven CI rounds):
+- Pushed the repo (T-025 lane) → first windows-build.yml run burnt 90 min
+  silently in the test suite (37 failures + 80-min hang).
+- Diagnosis ladder (not guessing): test Wait helpers dump engine diagnostics
+  on timeout; NOVA_TEST_TIMEOUT_SCALE (CI=3); --blame-hang 20m in the
+  workflow; loopback test HttpClients UseProxy=false + ConnectTimeout 15s.
+- Five latent Windows-only PRODUCT bugs found + fixed (all invisible on
+  Linux — see D-017): finalize-with-open-handle (every HTTP download looped
+  forever on Windows), hash/PGP verifier share-conflict with the live
+  writer, pipe DACL ReadWrite→FullControl (engine served ONE connection per
+  pipe on Windows), IpcConnection pipe-instance leak, ephemeral PEM client
+  keys (SChannel) → PFX round-trip. Plus YtDlpBridge.Quote always-quotes on
+  Windows (cmd.exe splits unquoted args on = ; ,).
+- CI/packaging repairs: Windows .cmd fake binaries (SHIFT-loop parsing — a
+  ")" in ".%(ext)s" breaks FOR-sets; 8-char suffix), test certs get
+  serverAuth/clientAuth EKUs, ClientCert mTLS handshake documented-skip on
+  Windows (SChannel untrusted-chain rule), Flutter runner C++ fixed against
+  the real 3.47.7 headers (GetInstance/Success; local _DROPFILES replica +
+  minimal IEnumFORMATETC), dependency-free STORE zip writer for extensions,
+  Farsi.isl vendored (official jrsoftware translation), installer payload
+  layout assembled by CI (build-release.ps1 contract), iss+ps1 zip names
+  wildcarded, installer [Code] per official AnsiString signatures (+Firefox
+  gets its own allowed_extensions manifest), 'BeforeInstall: none' dropped.
+- GREEN: run 41146761713 — every step (audit, engine build, **318/318
+  engine tests on real Windows**, Flutter Windows UI compiled, extensions,
+  Inno Setup installer, artifacts uploaded).
+- RELEASE: repo sayetars/nova-download-manager (created via the GitHub App);
+  v1.8.0 tag moved to the fixed commit b826a5a; tag run 41147670500 green;
+  GitHub Release LIVE: github.com/sayetars/nova-download-manager/releases/
+  tag/v1.8.0 with **nova-setup-1.8.0.exe (39.4 MB)** attached.
+- Memory docs: worklog T-026, D-017, STATE, VERSIONS (builds table:
+  nova-setup-1.8.0.exe + the Dropbox engine-zip supersession note),
+  KNOWN-LIMITATIONS (Windows-UI row closed).
 
 next:
-1. USER (last two clicks — key already validated, permissions verified):
-   a) create the empty repo (github.com/new — any name; public OK, history is
-      clean);
-   b) install the App on it: github.com/apps/universal-ai-developer/
-      installations/new → "Only select repositories" → pick the repo →
-      Install. (Alternative: "All repositories" — then the session can
-      create the repo itself via POST /user/repos since the App holds
-      repository_creation=write.)
-   Then the user sends the repo name (owner/name).
-2. Session: write repo into tools/github/.github-credentials.json →
-   `python3 scripts/github_app_probe.py` (verify installation + perms +
-   repo access) → `python3 scripts/github_release_push.py plan` →
-   `push` (main + tags v1.4.0…v1.8.0) → `status --watch`
-   windows-build.yml (audit gate → engine tests on Windows → Flutter UI →
-   extensions → Inno Setup installer → artifacts; the v1.8.0 tag push
-   auto-creates the GitHub Release via built-in GITHUB_TOKEN — zero user
-   secrets). Windows CI takes ~20-40 min; poll with `status` (plain) in
-   timeout-bounded chunks (`timeout 580 python3 … status --watch`).
-3. Windows real-machine feedback → v1.8.x PATCH lane.
-4. Future (all free): Linux tray + Linux drag-out, embedded player,
-   arbitrary non-modifier special keys, CWS/AMO publishing (D-013).
+1. USER: install nova-setup-1.8.0.exe on a real Windows machine → feedback
+   (install flow, tray, drag-out, extension registration, a real download).
+   Bugs found → v1.8.x PATCH lane: bump version.json → sync → test →
+   commit → `python3 scripts/github_release_push.py push` → move/push the
+   tag → CI builds + releases automatically.
+2. Repo maintenance: scripts/github_release_push.py plan|push|status
+   --watch; scripts/github_app_probe.py validates the App lane; local-only
+   credentials live in tools/github/ (600, gitignored, never archived).
+   NOTE: the sandbox recycles tools/github/* (key + creds) and the
+   toolchains — rebuild per RECOVERY.md §2 and re-copy the key from
+   upload/ when needed.
+3. Optional follow-ups (all free): upload the CI's fixed portable engine
+   bundle to Dropbox builds/ under a clearly-marked name (the 2026-10-30
+   Dropbox v1.8.0 engine zip predates the Windows fixes — superseded);
+   Linux tray + Linux drag-out; embedded player; CWS/AMO store publishing.
 
 evidence:
-- git log (post-rewrite v1.8.0 HEAD 08a6be3 + tags); fsck clean; history
-  secret-scan 0 hits; sync --check PASS; py_compile + guard-path outputs;
-  device-flow HTTP 400 probe output; /tmp/nova-git-backup-pre-rewrite.tar.gz
-  (session-local safety copy, never uploaded).
+- CI logs across rounds (io_error sharing violations with received==total;
+  "Access to the path is denied" instance-create storms; MSVC
+  DROPFILES/StandardMethodCodec errors; iscc AnsiString mismatch); green
+  run 41146761713; tag run 41147670500; releases API listing (v1.8.0,
+  asset nova-setup-1.8.0.exe 39.4 MB); local dotnet test 318/318.
 
-blockers: none on the session side — push waits only on user-supplied
-repo URL + auth (.pem or PAT or enabled device flow), by design (no
-secrets live in the repo).
+blockers: none — Windows CI + release lane fully operational.
 
 recovery: RECOVERY.md

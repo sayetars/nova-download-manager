@@ -9,7 +9,7 @@ This repository was **built and tested on Linux** (.NET 8.0.426 + Flutter 3.47.7
 | Area | Status |
 |---|---|
 | Engine, scheduler, media, persistence, IPC | **Built + 320/320 automated tests passing** (real HTTP, real files, real processes; v1.8.0) |
-| Flutter app | `flutter analyze` clean + 13 tests passing; **Windows UI binary NOT compiled here** (Flutter cannot cross-compile Windows from Linux) — v1.6.0+ ships the cross-compiled ENGINE side for Windows (`nova-engine-*-win-x64.zip`) and `.github/workflows/windows-build.yml` builds the full installer on a hosted Windows runner |
+| Flutter app | `flutter analyze` clean + 13 tests passing; **Windows UI binary now built by GitHub CI** (windows-build.yml on windows-latest — full Inno Setup installer + portable engine bundle, published as the v1.8.0+ GitHub Release artifacts; 318/318 engine tests also run on Windows itself) |
 | C++ pipe bridge (`nova/pipe`) | Compiles only with the Windows runner — **not compiled here** (no MSVC on Linux); the v1.6.0 GH Actions workflow compiles it on every run |
 | Windows installer (Inno Setup) | Script complete; **not compiled here** (iscc is Windows-only); the GH Actions workflow runs iscc on windows-latest |
 | Extension load in Chrome/Brave/Firefox | Built and packaged; **not manually tested in real browsers on this machine** (no GUI/browsers in the sandbox) |
